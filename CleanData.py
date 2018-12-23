@@ -5,13 +5,28 @@ import csv
 import geojson
 import json
 from geojson import Feature, FeatureCollection, Polygon
+import fiona
+import multiprocessing
 
 OHIO_BUILDING_SHAPES_FILE = "data/Ohio.geojson"
 COUNTY_SHAPES_FILE = "data/gz_2010_us_050_00_500k.json"
 BUILDING_AGES_FILE = "data/ColumbusBuildingAges.csv"
+PARCEL_AGES_FILE = "data/ParcelAges.csv"
+PARCEL_SHAPES_FILE = "data/20181101_Parcel_Polygons/TAXPARCEL_CONDOUNITSTACK_LGIM.shp"
 
-PointWithAge = namedtuple("PointWithAge", "position age")
+Parcel = namedtuple("Parcel", "number address year shape")
 BuildingWithAge = namedtuple("BuildingWithAge", "shape age")
+
+
+def _contains_letters(s):
+    return any(c.isalpha() for c in s)
+
+
+def _clean_parcel_id(s):
+    if s[-3:] == "-00":
+        return s[:-3].strip().replace("-", "")
+    else:
+        return s.strip().replace("-", "")
 
 
 def get_franklin_county_shape():
@@ -43,30 +58,6 @@ def get_franklin_co_buildings_shapes(franklin_county_shape):
     return result
 
 
-def load_building_ages():
-    result = []
-
-    with open(BUILDING_AGES_FILE, "r") as file:
-        reader = csv.reader(file)
-
-        # Removes header row
-        reader.__next__()
-
-        for row in reader:
-            latitude = row[3]
-            longitude = row[4]
-            year = row[5]
-
-            if len(year) > 0 and len(latitude) > 0 and len(latitude) > 0:
-                position = geometry.Point(float(longitude), float(latitude))
-                result.append(PointWithAge(position, int(year)))
-
-            if len(result) % 500 == 0:
-                print("Loaded " + str(len(result)) + " building point ages...")
-
-    return result
-
-
 def tag_buildings(building_shapes, point_ages):
     result = []
 
@@ -86,18 +77,63 @@ def tagged_buildings_to_geojson(tagged_buildings):
     return FeatureCollection(features)
 
 
-def main():
-    franklin_shape = get_franklin_county_shape()
-    print("Loaded Franklin County shape...")
-    point_ages = load_building_ages()
-    print("Loaded all (" + str(len(point_ages)) + ") building point ages...")
-    franklin_building_shapes = get_franklin_co_buildings_shapes(franklin_shape)
-    print("Loaded all (" + str(len(franklin_building_shapes)) + ") Franklin County building shapes...")
-    buildings_with_ages = tag_buildings(franklin_building_shapes, point_ages)
-    print("Tagged all (" + str(len(buildings_with_ages)) + ") building shapes with ages...")
+def load_parcel_shapes():
+    def create_polygon(parcel_feature):
+        parcel_id = _clean_parcel_id(parcel_feature["properties"]["PARCELID"])
 
-    with open("age_tagged_building_shapes.json", "w") as file:
-        geojson.dump(tagged_buildings_to_geojson(buildings_with_ages), file)
+        if not _contains_letters(parcel_id) and parcel_feature["geometry"] is not None:
+            return parcel_id, Polygon(parcel_feature["geometry"]["coordinates"])
+        else:
+            return None
+
+    parcel_shapes = [create_polygon(feature) for feature in fiona.open(PARCEL_SHAPES_FILE)]
+    parcel_shapes = list(filter(lambda x: x is not None, parcel_shapes))
+
+    print("Created all polygons (" + str(len(parcel_shapes)) + ")")
+
+    result = dict(parcel_shapes)
+
+    print("Mapped polygons to parcel IDs")
+    return result
+
+
+def tag_parcel_ages(parcel_shapes):
+    features = []
+
+    with open(PARCEL_AGES_FILE, "r") as file:
+        reader = csv.reader(file)
+
+        # Removes header row
+        reader.__next__()
+
+        for row in reader:
+            parcel_id = _clean_parcel_id(row[0])
+            address = row[1]
+            year = row[2]
+
+            if parcel_id is not None and len(year) > 0:
+                parcel_shape = parcel_shapes.get(parcel_id)
+
+                if parcel_shape is not None:
+                    feature = Feature(geometry=parcel_shape, properties={
+                        "parcel_id": parcel_id,
+                        "address": address,
+                        "year": int(year)})
+
+                    features.append(feature)
+
+                    if len(features) % 10000 == 0:
+                        print("Tagged " + str(len(features)) + " parcels with years...")
+
+    return FeatureCollection(features)
+
+
+def main():
+    parcel_shapes = load_parcel_shapes()
+    parcels = tag_parcel_ages(parcel_shapes)
+
+    with open("parcels.geojson", "w") as file:
+        geojson.dump(parcels, file)
 
     print("Done!")
 
