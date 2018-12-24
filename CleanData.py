@@ -6,7 +6,6 @@ import geojson
 import json
 from geojson import Feature, FeatureCollection, Polygon
 import fiona
-import multiprocessing
 
 OHIO_BUILDING_SHAPES_FILE = "data/Ohio.geojson"
 COUNTY_SHAPES_FILE = "data/gz_2010_us_050_00_500k.json"
