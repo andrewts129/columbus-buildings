@@ -6,6 +6,11 @@ import json
 import geojson
 import fiona
 import pyproj
+import subprocess
+import sys
+
+GEOJSON_OUT = "viz/data.geojson"
+MBTILES_OUT = "viz/data.mbtiles"
 
 BUILDING_AGES_FILE = "data/ColumbusBuildingAges.csv"
 PARCEL_AGES_FILE = "data/ParcelAges.csv"
@@ -30,7 +35,7 @@ def _clean_parcel_id(s):
 def clean_coordinates(coordinates):
     if isinstance(coordinates, tuple):
         converted_coords = pyproj.transform(IN_PROJ, OUT_PROJ, coordinates[0], coordinates[1], coordinates[2])
-        return converted_coords[0], converted_coords[1], converted_coords[2]
+        return converted_coords[0], converted_coords[1]
     else:
         return [clean_coordinates(x) for x in coordinates]
 
@@ -45,7 +50,7 @@ def load_parcels():
             if not _contains_letters(parcel_id) and feature["geometry"] is not None:
                 parcel_year_built = feature["properties"]["RESYRBLT"]
                 parcel_address = "TODO"
-                parcel_shape = geojson.Polygon(feature["geometry"]["coordinates"])
+                parcel_shape = geojson.Polygon(clean_coordinates(feature["geometry"]["coordinates"]))
 
                 new_feature = geojson.Feature(
                     geometry=parcel_shape,
@@ -61,19 +66,17 @@ def load_parcels():
                 if len(parcel_features) % 10000 == 0:
                     print("Loaded " + str(len(parcel_features)) + " parcels...")
 
-    print("Mapped polygons to parcel IDs")
     return geojson.FeatureCollection(parcel_features)
 
 
 def main():
     parcels = load_parcels()
-    #building_polygons = load_building_shapes()
 
-    with open("viz/data.geojson", "w") as file:
+    with open(GEOJSON_OUT, "w") as file:
         geojson.dump(parcels, file)
 
-    print("Parsed " + str(len(parcels)) + " parcels")
-    #print(len(building_polygons))
+    tippecanoe_command = "tippecanoe -o " + MBTILES_OUT + " -zg --drop-densest-as-needed --force " + GEOJSON_OUT
+    subprocess.call(tippecanoe_command.split(" "), stderr=sys.stderr, stdout=sys.stdout)
     print("Done!")
 
 
