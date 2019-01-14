@@ -50,7 +50,7 @@ def load_parcels():
             if not _contains_letters(parcel_id) and feature["geometry"] is not None:
                 parcel_year_built = feature["properties"]["RESYRBLT"]
                 parcel_address = "TODO"
-                parcel_shape = geojson.Polygon(clean_coordinates(feature["geometry"]["coordinates"]))
+                parcel_shape = geometry.shape(feature["geometry"])
 
                 new_feature = geojson.Feature(
                     geometry=parcel_shape,
@@ -69,8 +69,26 @@ def load_parcels():
     return geojson.FeatureCollection(parcel_features)
 
 
+def load_buildings():
+    building_shapes = []
+
+    with fiona.open(BUILDING_SHAPES_FILE) as features:
+        for feature in features:
+            building_shape = geometry.shape(feature["geometry"])
+            building_shapes.append(building_shape)
+
+            if len(building_shapes) % 10000 == 0:
+                print("Loaded " + str(len(building_shapes)) + " building shapes...")
+
+    return building_shapes
+
+
 def main():
     parcels = load_parcels()
+    print("Finished loading parcels!")
+
+    buildings = load_buildings()
+    print("Finished loading buildings!")
 
     with open(GEOJSON_OUT, "w") as file:
         geojson.dump(parcels, file)
