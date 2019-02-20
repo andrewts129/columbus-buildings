@@ -34,10 +34,13 @@ def _clean_parcel_id(s):
 
 def clean_coordinates(coordinates):
     if isinstance(coordinates, tuple):
-        converted_coords = pyproj.transform(IN_PROJ, OUT_PROJ, coordinates[0], coordinates[1], coordinates[2])
+        if len(coordinates) < 3:
+            converted_coords = pyproj.transform(IN_PROJ, OUT_PROJ, coordinates[0], coordinates[1])
+        else:
+            converted_coords = pyproj.transform(IN_PROJ, OUT_PROJ, coordinates[0], coordinates[1], coordinates[2])
         return converted_coords[0], converted_coords[1]
     else:
-        return [clean_coordinates(x) for x in coordinates]
+        return [clean_coordinates(sublist) for sublist in coordinates]
 
 
 def load_parcels():
@@ -49,7 +52,9 @@ def load_parcels():
 
             if not _contains_letters(parcel_id) and feature["geometry"] is not None:
                 parcel_year_built = feature["properties"]["RESYRBLT"]
-                parcel_address = "TODO"
+                parcel_address = feature["properties"]["SITEADDRES"]
+
+                feature["geometry"]["coordinates"] = clean_coordinates(feature["geometry"]["coordinates"])
                 parcel_shape = geometry.shape(feature["geometry"])
 
                 new_feature = {"geometry": parcel_shape,
@@ -70,6 +75,7 @@ def load_buildings():
 
     with fiona.open(BUILDING_SHAPES_FILE) as features:
         for feature in features:
+            feature["geometry"]["coordinates"] = clean_coordinates(feature["geometry"]["coordinates"])
             building_shape = geometry.shape(feature["geometry"])
             building_shapes.append(building_shape)
 
@@ -81,7 +87,7 @@ def load_buildings():
 
 def match_buildings_to_parcels(parcel_features, building_shapes):
     # TODO remove this once I can actually get the code below to terminate before the heat death of the universe
-    return parcel_features
+    return geojson.FeatureCollection(parcel_features)
 
     good_matches = 0
     partial_matches = 0
@@ -136,6 +142,7 @@ def main():
 
     with open(GEOJSON_OUT, "w") as file:
         geojson.dump(building_features, file)
+    print("Finished dumping data to " + GEOJSON_OUT)
 
     tippecanoe_command = "tippecanoe -o " + MBTILES_OUT + " -zg --drop-densest-as-needed --force " + GEOJSON_OUT
     subprocess.call(tippecanoe_command.split(" "), stderr=sys.stderr, stdout=sys.stdout)
