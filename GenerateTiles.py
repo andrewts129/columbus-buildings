@@ -1,4 +1,4 @@
-from shapely import geometry
+from shapely import geometry, ops
 import ijson.backends.yajl2_cffi as ijson
 import csv
 import geojson
@@ -8,6 +8,7 @@ import fiona
 import pyproj
 import subprocess
 import sys
+from functools import partial
 
 GEOJSON_OUT = "viz/data.geojson"
 MBTILES_OUT = "viz/data.mbtiles"
@@ -17,12 +18,19 @@ PARCEL_AGES_FILE = "data/ParcelAges.csv"
 PARCEL_SHAPES_FILE = "data/20181101_Parcel_Polygons/TAXPARCEL_CONDOUNITSTACK_LGIM.shp"
 BUILDING_SHAPES_FILE = "data/BuildingFootprints/BUILDINGFOOTPRINT.shp"
 
-IN_PROJ = pyproj.Proj("+proj=lcc +lat_0=38 +lat_1=38.73333333 +lat_2=40.03333 +lon_0=-82.5 +x_0=600000 +y_0=0 +datum=NAD83 +units=us-ft +no_defs")
+IN_PROJ = pyproj.Proj(
+    "+proj=lcc +lat_0=38 +lat_1=38.73333333 +lat_2=40.03333 +lon_0=-82.5 +x_0=600000 +y_0=0 +datum=NAD83 +units=us-ft +no_defs", preserve_units=True)
 OUT_PROJ = pyproj.Proj(init="epsg:4326")
+
+PROJECT = partial(pyproj.transform, IN_PROJ, OUT_PROJ)
 
 
 def _contains_letters(s):
     return any(c.isalpha() for c in s)
+
+
+def _sane_year_built(year):
+    return 1776 <= int(year) <= 2027
 
 
 def _clean_parcel_id(s):
@@ -34,11 +42,11 @@ def _clean_parcel_id(s):
 
 def clean_coordinates(coordinates):
     if isinstance(coordinates, tuple):
-        if len(coordinates) < 3:
-            converted_coords = pyproj.transform(IN_PROJ, OUT_PROJ, coordinates[0], coordinates[1])
-        else:
-            converted_coords = pyproj.transform(IN_PROJ, OUT_PROJ, coordinates[0], coordinates[1], coordinates[2])
-        return converted_coords[0], converted_coords[1]
+        # if len(coordinates) < 3:
+        #     converted_coords = pyproj.transform(IN_PROJ, OUT_PROJ, coordinates[0], coordinates[1])
+        # else:
+        #     converted_coords = pyproj.transform(IN_PROJ, OUT_PROJ, coordinates[0], coordinates[1], coordinates[2])
+        return coordinates[0], coordinates[1]
     else:
         return [clean_coordinates(sublist) for sublist in coordinates]
 
@@ -49,13 +57,14 @@ def load_parcels():
     with fiona.open(PARCEL_SHAPES_FILE) as features:
         for feature in features:
             parcel_id = feature["properties"]["PARCELID"]
+            parcel_year_built = feature["properties"]["RESYRBLT"]
 
-            if not _contains_letters(parcel_id) and feature["geometry"] is not None:
-                parcel_year_built = feature["properties"]["RESYRBLT"]
+            if not _contains_letters(parcel_id) and _sane_year_built(parcel_year_built) and feature["geometry"] is not None:
                 parcel_address = feature["properties"]["SITEADDRES"]
 
                 feature["geometry"]["coordinates"] = clean_coordinates(feature["geometry"]["coordinates"])
                 parcel_shape = geometry.shape(feature["geometry"])
+                parcel_shape = ops.transform(PROJECT, parcel_shape)
 
                 new_feature = {"geometry": parcel_shape,
                                "id": parcel_id,
@@ -87,7 +96,10 @@ def load_buildings():
 
 def match_buildings_to_parcels(parcel_features, building_shapes):
     # TODO remove this once I can actually get the code below to terminate before the heat death of the universe
-    return geojson.FeatureCollection(parcel_features)
+    return geojson.FeatureCollection(
+        [geojson.Feature(geometry=f["geometry"], properties={"id": f["id"],
+                                                             "address": f["address"],
+                                                             "year_built": f["year_built"]}) for f in parcel_features])
 
     good_matches = 0
     partial_matches = 0
@@ -120,7 +132,8 @@ def match_buildings_to_parcels(parcel_features, building_shapes):
                 partial_matches += 1
 
             if len(building_features) % 100 == 0:
-                print("Matched " + str(len(building_features)) + " buildings to features. (" + str(good_matches) + " full, " + str(partial_matches) + " partial, " + str(non_matches) + " failures)")
+                print("Matched " + str(len(building_features)) + " buildings to features. (" + str(
+                    good_matches) + " full, " + str(partial_matches) + " partial, " + str(non_matches) + " failures)")
         else:
             non_matches += 1
 
