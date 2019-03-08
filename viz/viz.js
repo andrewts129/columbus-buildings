@@ -3,9 +3,11 @@ window.onload = function() {
 
     let map = new mapboxgl.Map({
         container: 'map',
-        center: [39.9612, -82.9988],
-        zoom: 9,
-        style: 'mapbox://styles/mapbox/streets-v9'
+        center: [-82.9988, 39.9612],
+        zoom: 12,
+        minZoom: 11,
+        maxZoom: 16,
+        style: 'mapbox://styles/mapbox/light-v9'
     });
 
     map.on("load", function () {
@@ -17,6 +19,10 @@ window.onload = function() {
             maxzoom: 14
         });
 
+        const min_year = 1800;
+        const max_year = 2019;
+        const colors = ["#e41a1c", "#ff7f00", "#ffff33", "#4daf4a", "#377eb8"];
+
         map.addLayer({
             id: "buildings",
             type: "fill",
@@ -25,10 +31,9 @@ window.onload = function() {
             paint: {
                 "fill-color": {
                     "property": "year_built",
-                    "stops": [
-                        [1800, "white"],
-                        [2018, "steelblue"]
-                    ]
+                    "stops": colors.map(function (color, index) {
+                        return [min_year + (index * (max_year - min_year) / (colors.length - 1)), color]
+                    })
                 }
             }
         })
