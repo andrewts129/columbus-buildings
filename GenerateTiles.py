@@ -13,6 +13,7 @@ from shapely.strtree import STRtree
 from shapely.prepared import prep
 import multiprocessing as mp
 from itertools import repeat
+from datetime import datetime
 
 GEOJSON_OUT = "viz/data.geojson"
 MBTILES_OUT = "viz/data.mbtiles"
@@ -193,14 +194,19 @@ def match_buildings_to_parcels(parcel_data, building_shapes):
 
 
 def main():
+    start_time = datetime.now()
+
+    first_phase_start_time = datetime.now()
     parcel_data = load_parcels()
-    print("Finished loading parcels!")
+    print("Finished loading parcels! (" + str(datetime.now() - first_phase_start_time) + ")")
 
+    second_phase_start_time = datetime.now()
     building_shapes = load_buildings()
-    print("Finished loading buildings!")
+    print("Finished loading buildings! (" + str(datetime.now() - second_phase_start_time) + ")")
 
+    third_phase_start_time = datetime.now()
     building_features = match_buildings_to_parcels(parcel_data, building_shapes)
-    print("Finished matching buildings to parcels!")
+    print("Finished matching buildings to parcels! (" + str(datetime.now() - third_phase_start_time) + ")")
 
     with open(GEOJSON_OUT, "w") as file:
         geojson.dump(building_features, file)
@@ -208,7 +214,7 @@ def main():
 
     tippecanoe_command = "tippecanoe -o " + MBTILES_OUT + " --maximum-zoom=16 --minimum-zoom=11 --force " + GEOJSON_OUT
     subprocess.call(tippecanoe_command.split(" "), stderr=sys.stderr, stdout=sys.stdout)
-    print("Done!")
+    print("Done! (Total time: " + str(datetime.now() - start_time) + ")")
 
 
 if __name__ == '__main__':
