@@ -11,6 +11,8 @@ import sys
 from functools import partial
 from shapely.strtree import STRtree
 from shapely.prepared import prep
+import multiprocessing as mp
+from itertools import repeat
 
 GEOJSON_OUT = "viz/data.geojson"
 MBTILES_OUT = "viz/data.mbtiles"
@@ -25,6 +27,12 @@ IN_PROJ = pyproj.Proj(
 OUT_PROJ = pyproj.Proj(init="epsg:4326")
 
 PROJECT = partial(pyproj.transform, IN_PROJ, OUT_PROJ)
+
+
+class MatchStatus:
+    NONE = 1
+    PARTIAL = 2
+    FULL = 3
 
 
 def _contains_letters(s):
@@ -53,88 +61,120 @@ def clean_coordinates(coordinates):
         return [clean_coordinates(sublist) for sublist in coordinates]
 
 
+def parse_parcel_feature(parcel_feature):
+    parcel_id = parcel_feature["properties"]["PARCELID"]
+
+    parcel_year_built = parcel_feature["properties"]["RESYRBLT"]
+
+    if not _contains_letters(parcel_id) and _sane_year_built(parcel_year_built) and parcel_feature["geometry"] is not None:
+        parcel_address = parcel_feature["properties"]["SITEADDRES"]
+
+        parcel_feature["geometry"]["coordinates"] = clean_coordinates(parcel_feature["geometry"]["coordinates"])
+        parcel_shape = geometry.shape(parcel_feature["geometry"])
+        parcel_shape = ops.transform(PROJECT, parcel_shape)
+
+        return (parcel_shape.wkt, {"id": parcel_id, "address": parcel_address,
+                                   "year_built": parcel_year_built})
+    else:
+        return None
+
+
 def load_parcels():
     parcel_data = {}
 
+    pool = mp.Pool()
+
     with fiona.open(PARCEL_SHAPES_FILE) as features:
-        for feature in features:
-            parcel_id = feature["properties"]["PARCELID"]
-            parcel_year_built = feature["properties"]["RESYRBLT"]
-
-            if not _contains_letters(parcel_id) and _sane_year_built(parcel_year_built) and feature["geometry"] is not None:
-                parcel_address = feature["properties"]["SITEADDRES"]
-
-                feature["geometry"]["coordinates"] = clean_coordinates(feature["geometry"]["coordinates"])
-                parcel_shape = geometry.shape(feature["geometry"])
-                parcel_shape = ops.transform(PROJECT, parcel_shape)
-
-                parcel_data[parcel_shape.wkt] = {"id": parcel_id, "address": parcel_address,
-                                                   "year_built": parcel_year_built}
-
+        for result in pool.imap_unordered(parse_parcel_feature, features, chunksize=1000):
+            if result is not None:
+                parcel_data[result[0]] = result[1]
                 if len(parcel_data) % 10000 == 0:
                     print("Loaded " + str(len(parcel_data)) + " parcels...")
 
+    pool.terminate()
+    pool.join()
+
     return parcel_data
+
+
+def parse_building_feature(building_feature):
+    building_feature["geometry"]["coordinates"] = clean_coordinates(building_feature["geometry"]["coordinates"])
+    building_shape = geometry.shape(building_feature["geometry"])
+    building_shape = ops.transform(PROJECT, building_shape)
+    return building_shape
 
 
 def load_buildings():
     building_shapes = []
 
+    pool = mp.Pool()
+
     with fiona.open(BUILDING_SHAPES_FILE) as features:
-        for feature in features:
-            feature["geometry"]["coordinates"] = clean_coordinates(feature["geometry"]["coordinates"])
-            building_shape = geometry.shape(feature["geometry"])
-            building_shape = ops.transform(PROJECT, building_shape)
-            building_shapes.append(building_shape)
+        for result in pool.imap_unordered(parse_building_feature, features, chunksize=1000):
+            building_shapes.append(result)
 
             if len(building_shapes) % 10000 == 0:
                 print("Loaded " + str(len(building_shapes)) + " building shapes...")
 
+    pool.terminate()
+    pool.join()
+
     return building_shapes
 
 
-def match_buildings_to_parcels(parcel_data, building_shapes):
-    # TODO remove this once I can actually get the code below to terminate before the heat death of the universe
-    # return geojson.FeatureCollection(
-    #     [geojson.Feature(geometry=f["geometry"], properties={"id": f["id"],
-    #                                                          "address": f["address"],
-    #                                                          "year_built": f["year_built"]}) for f in parcel_features])
+def find_matching_parcel_wrapper(args):
+    def find_matching_parcel(building_shape, parcel_shape_tree):
+        match_status = MatchStatus.PARTIAL
 
-    good_matches = 0
-    partial_matches = 0
-    non_matches = 0
-
-    parcel_shapes = [wkt.loads(wkt_string) for wkt_string in parcel_data.keys()]
-    parcel_shape_tree = STRtree(parcel_shapes)
-
-    building_features = []
-
-    for building_shape in building_shapes:
-        is_partial = False
         matching_parcel_shape = None
         close_parcel_shapes = parcel_shape_tree.query(building_shape.buffer(0.001))
 
         for parcel_shape in close_parcel_shapes:
             if parcel_shape.contains(building_shape):
                 matching_parcel_shape = parcel_shape
-                good_matches += 1
-                is_partial = False
+                match_status = MatchStatus.FULL
                 break
             elif parcel_shape.intersects(building_shape):
                 matching_parcel_shape = parcel_shape
-                is_partial = True
 
         if matching_parcel_shape is None:
+            return MatchStatus.NONE, building_shape, None
+        else:
+            return match_status, building_shape, matching_parcel_shape.wkt
+
+    return find_matching_parcel(args[0], args[1])
+
+
+def match_buildings_to_parcels(parcel_data, building_shapes):
+    non_matches = 0
+    partial_matches = 0
+    full_matches = 0
+
+    parcel_shapes = [wkt.loads(wkt_string) for wkt_string in parcel_data.keys()]
+    parcel_shape_tree = STRtree(parcel_shapes)
+
+    building_features = []
+
+    pool = mp.Pool()
+
+    for result in pool.imap_unordered(find_matching_parcel_wrapper, zip(building_shapes, repeat(parcel_shape_tree)), chunksize=1000):
+        match_status, building_shape, matching_parcel_shape_wkt = result
+
+        if match_status == MatchStatus.NONE:
             non_matches += 1
+
             building_feature = geojson.Feature(geometry=building_shape, properties={
                 "id": "null",
                 "address": "null",
                 "year_built": 0
             })
         else:
-            if is_partial:
+            if match_status == MatchStatus.PARTIAL:
                 partial_matches += 1
-            matching_parcel_feature = parcel_data[matching_parcel_shape.wkt]
+            elif match_status == MatchStatus.FULL:
+                full_matches += 1
+
+            matching_parcel_feature = parcel_data[matching_parcel_shape_wkt]
             building_feature = geojson.Feature(geometry=building_shape, properties={
                 "id": matching_parcel_feature["id"],
                 "address": matching_parcel_feature["address"],
@@ -144,10 +184,10 @@ def match_buildings_to_parcels(parcel_data, building_shapes):
         building_features.append(building_feature)
 
         if len(building_features) % 1000 == 0:
-            print("Matched " + str(len(building_features)) + " buildings to parcel features! (G: " + str(good_matches) + ", P: " + str(partial_matches) + ", N: " + str(non_matches) + ")")
+            print("Matched " + str(len(building_features)) + " buildings to parcel features! (F: " + str(full_matches) + ", P: " + str(partial_matches) + ", N: " + str(non_matches) + ")")
 
-        if len(building_features) > 10000:
-            break
+    pool.terminate()
+    pool.join()
 
     return geojson.FeatureCollection(building_features)
 
