@@ -31,9 +31,9 @@ window.onload = function() {
             paint: {
                 "fill-color": {
                     "property": "year_built",
-                    "stops": colors.map(function (color, index) {
+                    "stops": [[0, "#000000"]].concat(colors.map(function (color, index) {
                         return [min_year + (index * (max_year - min_year) / (colors.length - 1)), color]
-                    })
+                    }))
                 }
             }
         })
