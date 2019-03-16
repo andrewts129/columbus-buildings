@@ -5,8 +5,7 @@ window.onload = function() {
         container: 'map',
         center: [-82.9988, 39.9612],
         zoom: 12,
-        minZoom: 11,
-        maxZoom: 16,
+        minZoom: 12,
         style: 'mapbox://styles/mapbox/light-v9'
     });
 
@@ -15,8 +14,6 @@ window.onload = function() {
             id: "buildings",
             type: "vector",
             tiles:["http://localhost:8080/data/data/{z}/{x}/{y}.pbf"],
-            minzoom: 0,
-            maxzoom: 14
         });
 
         const min_year = 1800;
