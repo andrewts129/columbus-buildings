@@ -14,6 +14,9 @@ from shapely.prepared import prep
 import multiprocessing as mp
 from itertools import repeat
 from datetime import datetime
+import logging
+import math
+
 
 GEOJSON_OUT = "viz/data.geojson"
 MBTILES_OUT = "viz/data.mbtiles"
@@ -28,6 +31,8 @@ IN_PROJ = pyproj.Proj(
 OUT_PROJ = pyproj.Proj(init="epsg:4326")
 
 PROJECT = partial(pyproj.transform, IN_PROJ, OUT_PROJ)
+
+logging.basicConfig(filename="loggy.log", format='%(asctime)s %(message)s', level=logging.INFO)
 
 
 class MatchStatus:
@@ -130,12 +135,13 @@ def find_matching_parcel_wrapper(args):
         matching_parcel_shape = None
         close_parcel_shapes = parcel_shape_tree.query(building_shape.buffer(0.001))
 
+        prep_building_shape = prep(building_shape)
         for parcel_shape in close_parcel_shapes:
-            if parcel_shape.contains(building_shape):
+            if prep_building_shape.within(parcel_shape):
                 matching_parcel_shape = parcel_shape
                 match_status = MatchStatus.FULL
                 break
-            elif parcel_shape.intersects(building_shape):
+            elif prep_building_shape.intersects(parcel_shape):
                 matching_parcel_shape = parcel_shape
 
         if matching_parcel_shape is None:
@@ -143,7 +149,12 @@ def find_matching_parcel_wrapper(args):
         else:
             return match_status, building_shape, matching_parcel_shape.wkt
 
-    return find_matching_parcel(args[0], args[1])
+    logging.info(mp.current_process().name + ": " + args[0].wkt)
+    try:
+        return find_matching_parcel(args[0], args[1])
+    except Exception as e:
+        logging.exception(e)
+        return MatchStatus.NONE, args[0], None
 
 
 def match_buildings_to_parcels(parcel_data, building_shapes):
@@ -158,7 +169,7 @@ def match_buildings_to_parcels(parcel_data, building_shapes):
 
     pool = mp.Pool()
 
-    for result in pool.imap_unordered(find_matching_parcel_wrapper, zip(building_shapes, repeat(parcel_shape_tree)), chunksize=1000):
+    for result in pool.imap_unordered(find_matching_parcel_wrapper, zip(building_shapes, repeat(parcel_shape_tree)), chunksize=math.ceil(len(building_shapes) / 8)):
         match_status, building_shape, matching_parcel_shape_wkt = result
 
         if match_status == MatchStatus.NONE:
@@ -184,7 +195,7 @@ def match_buildings_to_parcels(parcel_data, building_shapes):
 
         building_features.append(building_feature)
 
-        if len(building_features) % 1000 == 0:
+        if len(building_features) % 500 == 0:
             print("Matched " + str(len(building_features)) + " buildings to parcel features! (F: " + str(full_matches) + ", P: " + str(partial_matches) + ", N: " + str(non_matches) + ")")
 
     pool.terminate()

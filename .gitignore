@@ -3,3 +3,4 @@ data/
 *.geojson
 venv/
 *.mbtiles
+*.log
