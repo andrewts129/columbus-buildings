@@ -1,6 +1,4 @@
 window.onload = function() {
-    //mapboxgl.accessToken = "pk.eyJ1IjoiYW5kcmV3dHMxMjkiLCJhIjoiY2pxMThudjRiMHYwMjQ1c3pjMDlqYWVteiJ9.IMFflTD9AA78V9-5JQ-HeQ"
-
     let map = new mapboxgl.Map({
         container: 'map',
         center: [-82.9988, 39.9612],
