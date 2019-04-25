@@ -210,8 +210,8 @@
         "text-rotation-alignment": "map",
         "symbol-spacing": 500,
         "text-font": [
-          "Metropolis Medium Italic",
-          "Noto Sans Italic"
+          "Roboto Regular",
+          "Open Sans Regular"
         ],
         "text-size": 12
       },
@@ -1385,11 +1385,10 @@
       "layout": {
         "text-size": 10,
         "text-max-angle": 30,
-        "text-transform": "uppercase",
         "symbol-spacing": 350,
         "text-font": [
-          "Metropolis Regular",
-          "Noto Sans Regular"
+          "Roboto Regular",
+          "Open Sans Regular"
         ],
         "symbol-placement": "line",
         "visibility": "visible",
@@ -1433,8 +1432,8 @@
         "text-size": 10,
         "symbol-spacing": 350,
         "text-font": [
-          "Metropolis Light",
-          "Noto Sans Regular"
+          "Roboto Light",
+          "Open Sans Light"
         ],
         "symbol-placement": "line",
         "visibility": "visible",
