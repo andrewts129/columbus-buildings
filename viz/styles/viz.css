@@ -1,0 +1,51 @@
+#map {
+    height: 900px;
+}
+
+#legend {
+    position: absolute;
+    top: 850px;
+    left: 10px;
+    height: 40px;
+    width: 250px;
+    z-index: 10000;
+    text-align: center;
+    background: white;
+    display: flex;
+}
+
+#legend-gradient {
+    float: left;
+    width: 100%;
+    height: 10px;
+    background: linear-gradient(to right,
+    #e41a1c 0%,
+    #e41a1c 11%,
+    #f24d0e 11%,
+    #f24d0e 22%,
+    #ff7f00 22%,
+    #ff7f00 33%,
+    #FFBF1A 33%,
+    #FFBF1A 44%,
+    #ffff33 44%,
+    #ffff33 55%,
+    #A6D73F 55%,
+    #A6D73F 66%,
+    #4daf4a 66%,
+    #4daf4a 77%,
+    #429781 77%,
+    #429781 88%,
+    #377eb8 88%,
+    #377eb8 100%);
+}
+
+#legend-labels {
+    font-family: 'Roboto', sans-serif;
+    font-size: 14px;
+    margin: auto;
+    text-align: center;
+    width: 100%;
+    display: inline-flex;
+    flex-wrap: nowrap;
+    justify-content: space-between;
+}

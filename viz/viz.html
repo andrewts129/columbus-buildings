@@ -3,19 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <title>TODO</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.3.4/dist/leaflet.css"
-          integrity="sha512-puBpdR0798OZvTTbP4A8Ix/l+A4dHDD0DGqYW6RQ+9jxkRFclaxxQb/SJAWZfWAkuyeQUytO7+7N4QKrDh+drA=="
-          crossorigin=""/>
-    <script src="https://unpkg.com/leaflet@1.3.4/dist/leaflet.js"
-            integrity="sha512-nMMmRyTVoLYqjP9hrbed9S+FzjZHW5gY1TWCHA5ckwXZBadntCNs8kEqAWdrb9O7rxbCaA4lKTIWjDXZxflOcA=="
-            crossorigin=""></script>
-    <script src="https://unpkg.com/sql.js@0.3.2/js/sql.js"></script>
-    <script src="Leaflet.TileLayer.MBTiles.js"></script>
     <script src="https://api.mapbox.com/mapbox-gl-js/v0.35.1/mapbox-gl.js"></script>
     <link href="https://api.mapbox.com/mapbox-gl-js/v0.35.1/mapbox-gl.css" rel="stylesheet" />
+    <link href="styles/viz.css" rel="stylesheet">
 </head>
 <body>
-    <div id="map" style="height: 900px"></div>
+    <div id="map">
+        <div id="legend">
+            <span id="legend-gradient"></span>
+            <span id="legend-labels">
+                <span>1800</span>
+                <span>1850</span>
+                <span>1900</span>
+                <span>1950</span>
+                <span>2000</span>
+            </span>
+        </div>
+    </div>
 </body>
 <script src="viz.js"></script>
 </html>
