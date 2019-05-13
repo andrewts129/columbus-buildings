@@ -4,3 +4,4 @@ data/
 venv/
 *.mbtiles
 *.log
+*.sh
