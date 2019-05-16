@@ -229,11 +229,11 @@ def load_osu_building_ages():
     else:
         building_ages = {}
         with fiona.open(OSU_BUILDING_DATA_FILE) as features:
-            building_numbers = [str(feature["properties"]["BldgNumber"]) for feature in features]
+            building_numbers = [str(feature["properties"]["BLDG_NUM"]) for feature in features]
 
             # Not parallelized to avoid rate-limiting
             for num in building_numbers:
-                if num != "None" and num != "0":
+                if num != "None" and num != "0" and num != "x":
                     building_ages[num] = get_building_age(num)
                     print(f"Loaded {len(building_ages)} OSU building ages from {OSU_BUILDING_DETAILS_ENDPOINT}...")
 
@@ -250,14 +250,16 @@ def parse_osu_building_feature_wrapper(args):
         building_shape = ops.transform(PROJECT_OSU, building_shape)
         building_address = feature["properties"]["Address"]
 
-        building_year = building_ages.get(str(feature["properties"]["BldgNumber"]))
+        building_year = building_ages.get(str(feature["properties"]["BLDG_NUM"]))
         if building_year is None:
-            building_year = "0"
-
-        return geojson.Feature(geometry=building_shape, properties={
-            "address": building_address,
-            "year_built": building_year
-        })
+            # The Franklin county data already has outlines of every building, so no point in leaving in
+            # buildings with no year here
+            return None
+        else:
+            return geojson.Feature(geometry=building_shape, properties={
+                "address": building_address,
+                "year_built": building_year
+            })
 
     return parse_osu_building_feature(args[0], args[1])
 
@@ -269,13 +271,15 @@ def load_osu_building_features():
 
     with fiona.open(OSU_BUILDING_DATA_FILE) as features:
         for result in pool.imap_unordered(parse_osu_building_feature_wrapper, zip(features, repeat(building_ages)), chunksize=200):
-            building_features.append(result)
-            if len(building_features) % 100 == 0:
-                print(f"Loaded {len(building_features)} OSU building features...")
+            if result is not None:
+                building_features.append(result)
+                if len(building_features) % 100 == 0:
+                    print(f"Loaded {len(building_features)} OSU building features...")
 
     pool.terminate()
     pool.join()
 
+    # Buildings that didn't have a year assigned were returned as None and should be removed
     return building_features
 
 
