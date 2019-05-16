@@ -1,7 +1,4 @@
 from shapely import geometry, ops, wkt
-import ijson.backends.yajl2_cffi as ijson
-import csv
-import geojson
 import json
 import geojson
 import fiona
@@ -16,6 +13,9 @@ from itertools import repeat
 from datetime import datetime
 import logging
 import math
+import requests
+import re
+import os
 
 
 GEOJSON_OUT = "viz/data.geojson"
@@ -26,11 +26,21 @@ PARCEL_AGES_FILE = "data/ParcelAges.csv"
 PARCEL_SHAPES_FILE = "data/20181101_Parcel_Polygons/TAXPARCEL_CONDOUNITSTACK_LGIM.shp"
 BUILDING_SHAPES_FILE = "data/BuildingFootprints/BUILDINGFOOTPRINT.shp"
 
-IN_PROJ = pyproj.Proj(
-    "+proj=lcc +lat_0=38 +lat_1=38.73333333 +lat_2=40.03333 +lon_0=-82.5 +x_0=600000 +y_0=0 +datum=NAD83 +units=us-ft +no_defs", preserve_units=True)
+OSU_BUILDING_DATA_FILE = "data/OhioState/data.gdb"
+OSU_BUILDING_AGES_FILE = "data/OhioState/ages.json"
+OSU_BUILDING_DETAILS_ENDPOINT = "https://gismaps.osu.edu/OSUDataService/OSUService.svc/BuildingDetailsExtended"
+
+IN_PROJ_FRANKLIN = pyproj.Proj(
+    "+proj=lcc +lat_0=38 +lat_1=38.73333333 +lat_2=40.03333 +lon_0=-82.5 +x_0=600000 +y_0=0 +datum=NAD83 +units=us-ft +no_defs",
+    preserve_units=True)
+IN_PROJ_OSU = pyproj.Proj(
+    "+proj=lcc +lat_0=38 +lat_1=38.373333333 +lat_2=40.03333 +lon_0=-82.5 +x_0=50000 +y_0=0 +datum=WGS84 +units=us-in +no_defs",
+    preserve_units=True)
 OUT_PROJ = pyproj.Proj(init="epsg:4326")
 
-PROJECT = partial(pyproj.transform, IN_PROJ, OUT_PROJ)
+PROJECT_FRANKLIN = partial(pyproj.transform, IN_PROJ_FRANKLIN, OUT_PROJ)
+PROJECT_OSU = partial(pyproj.transform, IN_PROJ_OSU, OUT_PROJ)
+
 
 logging.basicConfig(filename="loggy.log", format='%(asctime)s %(message)s', level=logging.INFO)
 
@@ -59,9 +69,9 @@ def _clean_parcel_id(s):
 def clean_coordinates(coordinates):
     if isinstance(coordinates, tuple):
         # if len(coordinates) < 3:
-        #     converted_coords = pyproj.transform(IN_PROJ, OUT_PROJ, coordinates[0], coordinates[1])
+        #     converted_coords = pyproj.transform(IN_PROJ_FRANKLIN, OUT_PROJ, coordinates[0], coordinates[1])
         # else:
-        #     converted_coords = pyproj.transform(IN_PROJ, OUT_PROJ, coordinates[0], coordinates[1], coordinates[2])
+        #     converted_coords = pyproj.transform(IN_PROJ_FRANKLIN, OUT_PROJ, coordinates[0], coordinates[1], coordinates[2])
         return coordinates[0], coordinates[1]
     else:
         return [clean_coordinates(sublist) for sublist in coordinates]
@@ -77,7 +87,7 @@ def parse_parcel_feature(parcel_feature):
 
         parcel_feature["geometry"]["coordinates"] = clean_coordinates(parcel_feature["geometry"]["coordinates"])
         parcel_shape = geometry.shape(parcel_feature["geometry"])
-        parcel_shape = ops.transform(PROJECT, parcel_shape)
+        parcel_shape = ops.transform(PROJECT_FRANKLIN, parcel_shape)
 
         return (parcel_shape.wkt, {"id": parcel_id, "address": parcel_address,
                                    "year_built": parcel_year_built})
@@ -106,7 +116,7 @@ def load_parcels():
 def parse_building_feature(building_feature):
     building_feature["geometry"]["coordinates"] = clean_coordinates(building_feature["geometry"]["coordinates"])
     building_shape = geometry.shape(building_feature["geometry"])
-    building_shape = ops.transform(PROJECT, building_shape)
+    building_shape = ops.transform(PROJECT_FRANKLIN, building_shape)
     return building_shape
 
 
@@ -201,26 +211,89 @@ def match_buildings_to_parcels(parcel_data, building_shapes):
     pool.terminate()
     pool.join()
 
-    return geojson.FeatureCollection(building_features)
+    return building_features
+
+
+def load_osu_building_ages():
+    def get_building_age(building_number):
+        response = requests.get(f"{OSU_BUILDING_DETAILS_ENDPOINT}/{building_number}")
+        build_year_group = re.search('"Date Constructed":"(\\d*)/', response.text)
+        if build_year_group is None:
+            return "0"
+        else:
+            return build_year_group.group(1)
+
+    if os.path.isfile(OSU_BUILDING_AGES_FILE):
+        with open(OSU_BUILDING_AGES_FILE, "r") as f:
+            building_ages = json.load(f)
+            print(f"Loaded {len(building_ages)} OSU building ages from {OSU_BUILDING_AGES_FILE}...")
+            return building_ages
+    else:
+        building_ages = {}
+        with fiona.open(OSU_BUILDING_DATA_FILE) as features:
+            building_numbers = [str(feature["properties"]["BldgNumber"]) for feature in features]
+
+            # Not parallelized to avoid rate-limiting
+            for num in building_numbers:
+                if num != "None" and num != "0":
+                    building_ages[num] = get_building_age(num)
+                    print(f"Loaded {len(building_ages)} OSU building ages from {OSU_BUILDING_DETAILS_ENDPOINT}...")
+
+        print(f"Writing {len(building_ages)} OSU building ages to {OSU_BUILDING_AGES_FILE}...")
+        with open(OSU_BUILDING_AGES_FILE, "w") as f:
+            json.dump(building_ages, f)
+
+        return building_ages
+
+
+def parse_osu_building_feature_wrapper(args):
+    def parse_osu_building_feature(feature, building_ages):
+        building_shape = geometry.shape(feature["geometry"])
+        building_shape = ops.transform(PROJECT_OSU, building_shape)
+        building_address = feature["properties"]["Address"]
+
+        building_year = building_ages.get(str(feature["properties"]["BldgNumber"]))
+        if building_year is None:
+            building_year = "0"
+
+        return geojson.Feature(geometry=building_shape, properties={
+            "address": building_address,
+            "year_built": building_year
+        })
+
+    return parse_osu_building_feature(args[0], args[1])
+
+
+def load_osu_building_features():
+    building_ages = load_osu_building_ages()
+    building_features = []
+    pool = mp.Pool()
+
+    with fiona.open(OSU_BUILDING_DATA_FILE) as features:
+        for result in pool.imap_unordered(parse_osu_building_feature_wrapper, zip(features, repeat(building_ages)), chunksize=200):
+            building_features.append(result)
+            if len(building_features) % 100 == 0:
+                print(f"Loaded {len(building_features)} OSU building features...")
+
+    pool.terminate()
+    pool.join()
+
+    return building_features
 
 
 def main():
     start_time = datetime.now()
 
-    first_phase_start_time = datetime.now()
-    parcel_data = load_parcels()
-    print("Finished loading parcels! (" + str(datetime.now() - first_phase_start_time) + ")")
+    osu_building_features = load_osu_building_features()
 
-    second_phase_start_time = datetime.now()
-    building_shapes = load_buildings()
-    print("Finished loading buildings! (" + str(datetime.now() - second_phase_start_time) + ")")
+    franklin_parcel_data = load_parcels()
+    franklin_building_shapes = load_buildings()
+    franklin_building_features = match_buildings_to_parcels(franklin_parcel_data, franklin_building_shapes)
 
-    third_phase_start_time = datetime.now()
-    building_features = match_buildings_to_parcels(parcel_data, building_shapes)
-    print("Finished matching buildings to parcels! (" + str(datetime.now() - third_phase_start_time) + ")")
+    all_building_features = geojson.FeatureCollection(osu_building_features + franklin_building_features)
 
     with open(GEOJSON_OUT, "w") as file:
-        geojson.dump(building_features, file)
+        geojson.dump(all_building_features, file)
     print("Finished dumping data to " + GEOJSON_OUT)
 
     tippecanoe_command = "tippecanoe -Z12 -z15 -o " + MBTILES_OUT + " --coalesce-smallest-as-needed --extend-zooms-if-still-dropping --include=year_built --force " + GEOJSON_OUT
