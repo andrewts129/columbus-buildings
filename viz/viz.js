@@ -30,19 +30,34 @@ window.onload = function() {
         const unavailable_year = 0;
         const unavailable_color = "#eaeae5";
 
+        const dated_building_layer_id = "dated_buildings";
+        const undated_building_layer_id = "undated_buildings";
+
         map.addLayer({
-            id: "buildings",
+            id: dated_building_layer_id,
             type: "fill",
             source: "buildings",
             "source-layer": "data",
+            filter: ["!=", "year_built", unavailable_year],
             paint: {
                 "fill-color": {
                     "property": "year_built",
-                    "stops": [[unavailable_year, unavailable_color]].concat(colors.map(function (color, index) {
+                    "stops": colors.map(function (color, index) {
                         return [min_year + (index * (max_year - min_year) / (colors.length - 1)), color]
-                    }))
+                    })
                 }
             }
         });
+
+        map.addLayer({
+            id: undated_building_layer_id,
+            type: "fill",
+            source: "buildings",
+            "source-layer": "data",
+            filter: ["==", "year_built", 0],
+            paint: {
+                "fill-color": unavailable_color
+            }
+        }, "dated_buildings");
     })
 };
