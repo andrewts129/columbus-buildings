@@ -298,8 +298,7 @@ def main():
         geojson.dump(all_building_features, file)
     print(f"Finished dumping data to {GEOJSON_OUT}")
 
-    tippecanoe_command = f"tippecanoe -Z12 -z15 -o {MBTILES_OUT} --coalesce-smallest-as-needed --extend-zooms-if-still-dropping --include=year_built --force {GEOJSON_OUT}"
-    subprocess.call(tippecanoe_command.split(" "), stderr=sys.stderr, stdout=sys.stdout)
+    subprocess.call(["bash", "tippecanoe_cmd.sh", MBTILES_OUT, GEOJSON_OUT], stderr=sys.stderr, stdout=sys.stdout)
     print("Done! (Total time: " + str(datetime.now() - start_time) + ")")
 
 

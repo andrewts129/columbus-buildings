@@ -4,4 +4,4 @@ data/
 venv/
 *.mbtiles
 *.log
-*.sh
+tileserver/*.sh
