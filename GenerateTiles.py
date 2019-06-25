@@ -103,7 +103,7 @@ def load_parcels():
             if result is not None:
                 parcel_data[result[0]] = result[1]
                 if len(parcel_data) % 10000 == 0:
-                    print("Loaded " + str(len(parcel_data)) + " parcels...")
+                    print(f"Loaded {str(len(parcel_data))} parcels...")
 
     pool.terminate()
     pool.join()
@@ -204,7 +204,7 @@ def match_buildings_to_parcels(parcel_data, building_shapes):
         building_features.append(building_feature)
 
         if len(building_features) % 500 == 0:
-            print("Matched " + str(len(building_features)) + " buildings to parcel features! (F: " + str(full_matches) + ", P: " + str(partial_matches) + ", N: " + str(non_matches) + ")")
+            print(f"Matched {str(len(building_features))} buildings to parcel features! (F: {str(full_matches)}, P: {str(partial_matches)}, N: {str(non_matches)})")
 
     pool.terminate()
     pool.join()
@@ -296,9 +296,9 @@ def main():
 
     with open(GEOJSON_OUT, "w") as file:
         geojson.dump(all_building_features, file)
-    print("Finished dumping data to " + GEOJSON_OUT)
+    print(f"Finished dumping data to {GEOJSON_OUT}")
 
-    tippecanoe_command = "tippecanoe -Z12 -z15 -o " + MBTILES_OUT + " --coalesce-smallest-as-needed --extend-zooms-if-still-dropping --include=year_built --force " + GEOJSON_OUT
+    tippecanoe_command = f"tippecanoe -Z12 -z15 -o {MBTILES_OUT} --coalesce-smallest-as-needed --extend-zooms-if-still-dropping --include=year_built --force {GEOJSON_OUT}"
     subprocess.call(tippecanoe_command.split(" "), stderr=sys.stderr, stdout=sys.stdout)
     print("Done! (Total time: " + str(datetime.now() - start_time) + ")")
 
