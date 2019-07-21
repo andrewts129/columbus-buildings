@@ -8,9 +8,9 @@ window.onload = function() {
         let map = new mapboxgl.Map({
             container: 'map',
             center: [-82.9988, 39.9612],
-            zoom: 12,
-            minZoom: 12,
-            maxZoom: 18,
+            zoom: 11,
+            minZoom: 11,
+            maxZoom: 16,
             style: tileServerURL + "/styles/base/style.json",
             antialias: true,
         });
@@ -20,7 +20,7 @@ window.onload = function() {
                 id: "buildings",
                 type: "vector",
                 tiles:[tileServerURL + "/data/data/{z}/{x}/{y}.pbf"],
-                minzoom: 12,
+                minzoom: 11,
                 maxzoom: 15,
             });
 
