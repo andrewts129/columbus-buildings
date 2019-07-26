@@ -18,8 +18,9 @@ import re
 import os
 
 
-GEOJSON_OUT = "viz/data.geojson"
-MBTILES_OUT = "viz/data.mbtiles"
+DATED_GEOJSON_OUT = "viz/building_data_dated.geojson"
+UNDATED_GEOJSON_OUT = "viz/building_data_undated.geojson"
+MBTILES_OUT = "viz/building_data.mbtiles"
 
 # From ftp://apps.franklincountyauditor.com/GIS_Shapefiles
 PARCEL_SHAPES_FILE = "data/20190430_Parcel_Polygons/TAXPARCEL_CONDOUNITSTACK_LGIM.shp"
@@ -251,7 +252,7 @@ def parse_osu_building_feature_wrapper(args):
         building_address = feature["properties"]["Address"]
 
         building_year = building_ages.get(str(feature["properties"]["BLDG_NUM"]))
-        if building_year is None:
+        if building_year is None or building_year == 0:
             # The Franklin county data already has outlines of every building, so no point in leaving in
             # buildings with no year here
             return None
@@ -283,6 +284,19 @@ def load_osu_building_features():
     return building_features
 
 
+def divide_features_by_dated_status(features):
+    dated_building_features = []
+    undated_building_features = []
+
+    for feature in features:
+        if feature["year_built"] == 0:
+            undated_building_features.append(feature)
+        else:
+            dated_building_features.append(feature)
+
+    return dated_building_features, undated_building_features
+
+
 def main():
     start_time = datetime.now()
 
@@ -292,13 +306,18 @@ def main():
     franklin_building_shapes = load_buildings()
     franklin_building_features = match_buildings_to_parcels(franklin_parcel_data, franklin_building_shapes)
 
-    all_building_features = geojson.FeatureCollection(osu_building_features + franklin_building_features)
+    all_building_features = osu_building_features + franklin_building_features
+    dated_building_features, undated_building_features = divide_features_by_dated_status(all_building_features)
 
-    with open(GEOJSON_OUT, "w") as file:
-        geojson.dump(all_building_features, file)
-    print(f"Finished dumping data to {GEOJSON_OUT}")
+    with open(DATED_GEOJSON_OUT, "w") as file:
+        geojson.dump(geojson.FeatureCollection(dated_building_features), file)
+    print(f"Finished dumping data to {DATED_GEOJSON_OUT}")
 
-    subprocess.call(["bash", "tippecanoe_cmd.sh", MBTILES_OUT, GEOJSON_OUT], stderr=sys.stderr, stdout=sys.stdout)
+    with open(UNDATED_GEOJSON_OUT, "w") as file:
+        geojson.dump(geojson.FeatureCollection(undated_building_features), file)
+    print(f"Finished dumping data to {UNDATED_GEOJSON_OUT}")
+
+    subprocess.call(["bash", "tippecanoe_cmd.sh", MBTILES_OUT, DATED_GEOJSON_OUT, UNDATED_GEOJSON_OUT], stderr=sys.stderr, stdout=sys.stdout)
     print("Done! (Total time: " + str(datetime.now() - start_time) + ")")
 
 
