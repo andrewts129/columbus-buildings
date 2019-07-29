@@ -18,8 +18,7 @@ import re
 import os
 
 
-DATED_GEOJSON_OUT = "viz/building_data_dated.geojson"
-UNDATED_GEOJSON_OUT = "viz/building_data_undated.geojson"
+GEOJSON_OUT = "viz/building_data.geojson"
 MBTILES_OUT = "viz/building_data.mbtiles"
 
 # From ftp://apps.franklincountyauditor.com/GIS_Shapefiles
@@ -284,6 +283,30 @@ def load_osu_building_features():
     return building_features
 
 
+def filter_intersecting_undated_buildings(dated_features, undated_features):
+    dated_building_shapes = [geometry.shape(feature["geometry"]) for feature in dated_features]
+    dated_shape_tree = STRtree(dated_building_shapes)
+
+    non_intersecting_undateds = []
+
+    for undated_feature in undated_features:
+        undated_building_shape = geometry.shape(undated_feature["geometry"])
+        close_dated_shapes = dated_shape_tree.query(undated_building_shape.buffer(0.001))
+
+        undated_feature_shape_prep = prep(undated_building_shape)
+
+        intersects = False
+        for close_dated_shape in close_dated_shapes:
+            if undated_feature_shape_prep.intersects(close_dated_shape):
+                intersects = True
+                break
+
+        if not intersects:
+            non_intersecting_undateds.append(undated_feature)
+
+    return non_intersecting_undateds
+
+
 def divide_features_by_dated_status(features):
     dated_building_features = []
     undated_building_features = []
@@ -312,15 +335,14 @@ def main():
     all_building_features = osu_building_features + franklin_building_features
     dated_building_features, undated_building_features = divide_features_by_dated_status(all_building_features)
 
-    print(f"Going to dump {len(dated_building_features)} dated building features to {DATED_GEOJSON_OUT}...")
-    with open(DATED_GEOJSON_OUT, "w") as file:
+    undated_building_features = filter_intersecting_undated_buildings(dated_building_features, undated_building_features)
+    final_building_features = dated_building_features + undated_building_features
+
+    print(f"Going to dump {len(final_building_features)} building features to {GEOJSON_OUT}...")
+    with open(GEOJSON_OUT, "w") as file:
         geojson.dump(geojson.FeatureCollection(dated_building_features), file)
 
-    print(f"Going to dump {len(undated_building_features)} undated building features to {UNDATED_GEOJSON_OUT}...")
-    with open(UNDATED_GEOJSON_OUT, "w") as file:
-        geojson.dump(geojson.FeatureCollection(undated_building_features), file)
-
-    subprocess.call(["bash", "tippecanoe_cmd.sh", MBTILES_OUT, DATED_GEOJSON_OUT, UNDATED_GEOJSON_OUT], stderr=sys.stderr, stdout=sys.stdout)
+    subprocess.call(["bash", "tippecanoe_cmd.sh", MBTILES_OUT, GEOJSON_OUT], stderr=sys.stderr, stdout=sys.stdout)
     print("Done! (Total time: " + str(datetime.now() - start_time) + ")")
 
 
