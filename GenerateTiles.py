@@ -34,10 +34,10 @@ OSU_BUILDING_DETAILS_ENDPOINT = "https://gismaps.osu.edu/OSUDataService/OSUServi
 OSU_BUILDING_AGES_FILE = "data/OhioState/ages.json"
 
 IN_PROJ_FRANKLIN = pyproj.Proj(
-    "+proj=lcc +lat_0=38 +lat_1=38.73333333 +lat_2=40.03333 +lon_0=-82.5 +x_0=600000 +y_0=0 +datum=NAD83 +units=us-ft +no_defs",
+    "+proj=lcc +lat_0=38 +lat_1=38.73333333333333 +lat_2=40.03333333333333 +lon_0=-82.5 +x_0=600000 +y_0=0 +datum=NAD83 +units=us-ft +no_defs",
     preserve_units=True)
 IN_PROJ_OSU = pyproj.Proj(
-    "+proj=lcc +lat_0=38 +lat_1=38.373333333 +lat_2=40.03333 +lon_0=-82.5 +x_0=50000 +y_0=0 +datum=WGS84 +units=us-in +no_defs",
+    "+proj=lcc +lat_0=38 +lat_1=38.37333333333334 +lat_2=40.03333333333333 +lon_0=-82.5 +x_0=50000 +y_0=0 +datum=WGS84 +units=us-in +no_defs",
     preserve_units=True)
 OUT_PROJ = pyproj.Proj(init="epsg:4326")
 
