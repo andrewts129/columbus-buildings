@@ -23,8 +23,8 @@ UNDATED_GEOJSON_OUT = "viz/building_data_undated.geojson"
 MBTILES_OUT = "viz/building_data.mbtiles"
 
 # From ftp://apps.franklincountyauditor.com/GIS_Shapefiles
-PARCEL_SHAPES_FILE = "data/20190430_Parcel_Polygons/TAXPARCEL_CONDOUNITSTACK_LGIM.shp"
-BUILDING_SHAPES_FILE = "data/20190430_BuildingFootprints/BUILDINGFOOTPRINT.shp"
+PARCEL_SHAPES_FILE = "data/20190727_Parcel_Polygons/TAXPARCEL_CONDOUNITSTACK_LGIM.shp"
+BUILDING_SHAPES_FILE = "data/20190727_BuildingFootprints/BUILDINGFOOTPRINT.shp"
 
 # From https://gismaps.osu.edu/OSUMaps/Default.html?#
 OSU_BUILDING_DATA_FILE = "data/OhioState/data.gdb"
