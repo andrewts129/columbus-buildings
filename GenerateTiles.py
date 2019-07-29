@@ -294,6 +294,9 @@ def divide_features_by_dated_status(features):
         else:
             dated_building_features.append(feature)
 
+        if len(dated_building_features) + len(undated_building_features) % 10000:
+            print(f"Divided {len(dated_building_features) + len(undated_building_features)} building features...")
+
     return dated_building_features, undated_building_features
 
 
@@ -309,13 +312,13 @@ def main():
     all_building_features = osu_building_features + franklin_building_features
     dated_building_features, undated_building_features = divide_features_by_dated_status(all_building_features)
 
+    print(f"Going to dump {len(dated_building_features)} dated building features to {DATED_GEOJSON_OUT}...")
     with open(DATED_GEOJSON_OUT, "w") as file:
         geojson.dump(geojson.FeatureCollection(dated_building_features), file)
-    print(f"Finished dumping data to {DATED_GEOJSON_OUT}")
 
+    print(f"Going to dump {len(undated_building_features)} undated building features to {UNDATED_GEOJSON_OUT}...")
     with open(UNDATED_GEOJSON_OUT, "w") as file:
         geojson.dump(geojson.FeatureCollection(undated_building_features), file)
-    print(f"Finished dumping data to {UNDATED_GEOJSON_OUT}")
 
     subprocess.call(["bash", "tippecanoe_cmd.sh", MBTILES_OUT, DATED_GEOJSON_OUT, UNDATED_GEOJSON_OUT], stderr=sys.stderr, stdout=sys.stdout)
     print("Done! (Total time: " + str(datetime.now() - start_time) + ")")
