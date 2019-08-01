@@ -283,6 +283,22 @@ def load_osu_building_features():
     return building_features
 
 
+def divide_features_by_dated_status(features):
+    dated_building_features = []
+    undated_building_features = []
+
+    for feature in features:
+        if feature["year_built"] == 0:
+            undated_building_features.append(feature)
+        else:
+            dated_building_features.append(feature)
+
+        if len(dated_building_features) + len(undated_building_features) % 10000:
+            print(f"Divided {len(dated_building_features) + len(undated_building_features)} building features...")
+
+    return dated_building_features, undated_building_features
+
+
 def filter_intersecting_undated_buildings(dated_features, undated_features):
     dated_building_shapes = [geometry.shape(feature["geometry"]) for feature in dated_features]
     dated_shape_tree = STRtree(dated_building_shapes)
@@ -305,22 +321,6 @@ def filter_intersecting_undated_buildings(dated_features, undated_features):
             non_intersecting_undateds.append(undated_feature)
 
     return non_intersecting_undateds
-
-
-def divide_features_by_dated_status(features):
-    dated_building_features = []
-    undated_building_features = []
-
-    for feature in features:
-        if feature["year_built"] == 0:
-            undated_building_features.append(feature)
-        else:
-            dated_building_features.append(feature)
-
-        if len(dated_building_features) + len(undated_building_features) % 10000:
-            print(f"Divided {len(dated_building_features) + len(undated_building_features)} building features...")
-
-    return dated_building_features, undated_building_features
 
 
 def main():
