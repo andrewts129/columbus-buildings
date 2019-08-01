@@ -288,12 +288,12 @@ def divide_features_by_dated_status(features):
     undated_building_features = []
 
     for feature in features:
-        if feature["year_built"] == 0:
+        if feature["properties"]["year_built"] == 0:
             undated_building_features.append(feature)
         else:
             dated_building_features.append(feature)
 
-        if len(dated_building_features) + len(undated_building_features) % 10000:
+        if len(dated_building_features) + len(undated_building_features) % 10000 == 0:
             print(f"Divided {len(dated_building_features) + len(undated_building_features)} building features...")
 
     return dated_building_features, undated_building_features
@@ -330,7 +330,7 @@ def filter_intersecting_undated_buildings(dated_features, undated_features):
         else:
             non_intersecting_undateds.append(result)
 
-        if len(non_intersecting_undateds) + num_intersecting_undateds % 100 == 0:
+        if len(non_intersecting_undateds) + num_intersecting_undateds % 1000 == 0:
             print(f"Filtered out {num_intersecting_undateds} undated buildings that intersect with a dated building... (Parsed {len(non_intersecting_undateds) + num_intersecting_undateds} undated buildings total...")
 
     pool.terminate()
