@@ -299,26 +299,42 @@ def divide_features_by_dated_status(features):
     return dated_building_features, undated_building_features
 
 
-def filter_intersecting_undated_buildings(dated_features, undated_features):
-    dated_building_shapes = [geometry.shape(feature["geometry"]) for feature in dated_features]
-    dated_shape_tree = STRtree(dated_building_shapes)
-
-    non_intersecting_undateds = []
-
-    for undated_feature in undated_features:
+def intersects_with_dated_wrapper(args):
+    def intersects_with_dated(undated_feature, dated_shape_tree):
         undated_building_shape = geometry.shape(undated_feature["geometry"])
         close_dated_shapes = dated_shape_tree.query(undated_building_shape.buffer(0.001))
 
         undated_feature_shape_prep = prep(undated_building_shape)
 
-        intersects = False
         for close_dated_shape in close_dated_shapes:
             if undated_feature_shape_prep.intersects(close_dated_shape):
-                intersects = True
-                break
+                return True
 
-        if not intersects:
-            non_intersecting_undateds.append(undated_feature)
+        return False
+
+    return intersects_with_dated(args[0], args[1])
+
+
+def filter_intersecting_undated_buildings(dated_features, undated_features):
+    dated_building_shapes = [geometry.shape(feature["geometry"]) for feature in dated_features]
+    dated_shape_tree = STRtree(dated_building_shapes)
+
+    num_intersecting_undateds = 0
+    non_intersecting_undateds = []
+
+    pool = mp.Pool()
+
+    for result in pool.imap_unordered(intersects_with_dated_wrapper, zip(undated_features, repeat(dated_shape_tree)), chunksize=math.ceil(len(undated_features) / 8)):
+        if result is True:
+            num_intersecting_undateds += 1
+        else:
+            non_intersecting_undateds.append(result)
+
+        if len(non_intersecting_undateds) + num_intersecting_undateds % 100 == 0:
+            print(f"Filtered out {num_intersecting_undateds} undated buildings that intersect with a dated building... (Parsed {len(non_intersecting_undateds) + num_intersecting_undateds} undated buildings total...")
+
+    pool.terminate()
+    pool.join()
 
     return non_intersecting_undateds
 
