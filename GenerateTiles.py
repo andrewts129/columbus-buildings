@@ -9,7 +9,7 @@ from functools import partial
 from shapely.strtree import STRtree
 from shapely.prepared import prep
 import multiprocessing as mp
-from itertools import repeat
+import itertools
 from datetime import datetime
 import logging
 import math
@@ -177,7 +177,7 @@ def match_buildings_to_parcels(parcel_data, building_shapes):
 
     pool = mp.Pool()
 
-    for result in pool.imap_unordered(find_matching_parcel_wrapper, zip(building_shapes, repeat(parcel_shape_tree)), chunksize=math.ceil(len(building_shapes) / 8)):
+    for result in pool.imap_unordered(find_matching_parcel_wrapper, zip(building_shapes, itertools.repeat(parcel_shape_tree)), chunksize=math.ceil(len(building_shapes) / 8)):
         match_status, building_shape, matching_parcel_shape_wkt = result
 
         if match_status == MatchStatus.NONE:
@@ -270,7 +270,7 @@ def load_osu_building_features():
     pool = mp.Pool()
 
     with fiona.open(OSU_BUILDING_DATA_FILE) as features:
-        for result in pool.imap_unordered(parse_osu_building_feature_wrapper, zip(features, repeat(building_ages)), chunksize=200):
+        for result in pool.imap_unordered(parse_osu_building_feature_wrapper, zip(features, itertools.repeat(building_ages)), chunksize=200):
             if result is not None:
                 building_features.append(result)
                 if len(building_features) % 100 == 0:
@@ -293,7 +293,7 @@ def divide_features_by_dated_status(features):
         else:
             dated_building_features.append(feature)
 
-        if len(dated_building_features) + len(undated_building_features) % 10000 == 0:
+        if len(dated_building_features) + len(undated_building_features) % 5000 == 0:
             print(f"Divided {len(dated_building_features) + len(undated_building_features)} building features...")
 
     return dated_building_features, undated_building_features
@@ -324,7 +324,7 @@ def filter_intersecting_undated_buildings(dated_features, undated_features):
 
     pool = mp.Pool()
 
-    for result in pool.imap_unordered(intersects_with_dated_wrapper, zip(undated_features, repeat(dated_shape_tree)), chunksize=math.ceil(len(undated_features) / 8)):
+    for result in pool.imap_unordered(intersects_with_dated_wrapper, zip(undated_features, itertools.repeat(dated_shape_tree)), chunksize=math.ceil(len(undated_features) / 8)):
         if result is True:
             num_intersecting_undateds += 1
         else:
@@ -348,7 +348,7 @@ def main():
     franklin_building_shapes = load_buildings()
     franklin_building_features = match_buildings_to_parcels(franklin_parcel_data, franklin_building_shapes)
 
-    all_building_features = osu_building_features + franklin_building_features
+    all_building_features = itertools.chain(osu_building_features, franklin_building_features)
     dated_building_features, undated_building_features = divide_features_by_dated_status(all_building_features)
 
     undated_building_features = filter_intersecting_undated_buildings(dated_building_features, undated_building_features)
