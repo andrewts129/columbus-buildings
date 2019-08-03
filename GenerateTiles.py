@@ -18,8 +18,8 @@ import re
 import os
 
 
-GEOJSON_OUT = "viz/building_data.geojson"
-MBTILES_OUT = "viz/building_data.mbtiles"
+GEOJSON_OUT = "viz/buildings.geojson"
+MBTILES_OUT = "viz/buildings.mbtiles"
 
 # From ftp://apps.franklincountyauditor.com/GIS_Shapefiles
 PARCEL_SHAPES_FILE = "data/20190727_Parcel_Polygons/TAXPARCEL_CONDOUNITSTACK_LGIM.shp"

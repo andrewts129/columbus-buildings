@@ -30,8 +30,8 @@
     "columbus": {
       "mbtiles": "columbus.mbtiles"
     },
-    "data": {
-      "mbtiles": "data.mbtiles"
+    "buildings": {
+      "mbtiles": "buildings.mbtiles"
     }
   }
 }
