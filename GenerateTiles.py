@@ -356,7 +356,7 @@ def main():
 
     print(f"Going to dump {len(final_building_features)} building features to {GEOJSON_OUT}...")
     with open(GEOJSON_OUT, "w") as file:
-        geojson.dump(geojson.FeatureCollection(dated_building_features), file)
+        geojson.dump(geojson.FeatureCollection(final_building_features), file)
 
     subprocess.call(["bash", "tippecanoe_cmd.sh", MBTILES_OUT, GEOJSON_OUT], stderr=sys.stderr, stdout=sys.stdout)
     print("Done! (Total time: " + str(datetime.now() - start_time) + ")")
