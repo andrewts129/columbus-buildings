@@ -10,7 +10,7 @@ window.onload = function() {
             center: [-82.9988, 39.9612],
             zoom: 11,
             minZoom: 11,
-            maxZoom: 15,
+            maxZoom: 16,
             style: tileServerURL + "/styles/base/style.json",
             antialias: true,
         });
