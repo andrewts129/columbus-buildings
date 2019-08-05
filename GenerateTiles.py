@@ -299,6 +299,7 @@ def divide_features_by_dated_status(features):
     return dated_building_features, undated_building_features
 
 
+# Returns None is the feature intersects with a dated building, the feature otherwise
 def intersects_with_dated_wrapper(args):
     def intersects_with_dated(undated_feature, dated_shape_tree):
         undated_building_shape = geometry.shape(undated_feature["geometry"])
@@ -308,9 +309,9 @@ def intersects_with_dated_wrapper(args):
 
         for close_dated_shape in close_dated_shapes:
             if undated_feature_shape_prep.intersects(close_dated_shape):
-                return True
+                return None
 
-        return False
+        return undated_feature
 
     return intersects_with_dated(args[0], args[1])
 
@@ -324,11 +325,11 @@ def filter_intersecting_undated_buildings(dated_features, undated_features):
 
     pool = mp.Pool()
 
-    for result in pool.imap_unordered(intersects_with_dated_wrapper, zip(undated_features, itertools.repeat(dated_shape_tree)), chunksize=math.ceil(len(undated_features) / 8)):
-        if result is True:
+    for feature in pool.imap_unordered(intersects_with_dated_wrapper, zip(undated_features, itertools.repeat(dated_shape_tree)), chunksize=math.ceil(len(undated_features) / 8)):
+        if feature is None:
             num_intersecting_undateds += 1
         else:
-            non_intersecting_undateds.append(result)
+            non_intersecting_undateds.append(feature)
 
         if (len(non_intersecting_undateds) + num_intersecting_undateds) % 1000 == 0:
             print(f"Filtered out {num_intersecting_undateds} undated buildings that intersect with a dated building... (Parsed {len(non_intersecting_undateds) + num_intersecting_undateds} undated buildings total...")
@@ -352,6 +353,8 @@ def main():
     dated_building_features, undated_building_features = divide_features_by_dated_status(all_building_features)
 
     undated_building_features = filter_intersecting_undated_buildings(dated_building_features, undated_building_features)
+    print(f"Keeping {len(undated_building_features)} buildings without dates...")
+
     final_building_features = dated_building_features + undated_building_features
 
     print(f"Going to dump {len(final_building_features)} building features to {GEOJSON_OUT}...")
