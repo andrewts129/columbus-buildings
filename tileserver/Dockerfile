@@ -1,4 +1,4 @@
-FROM node:6.15.1-stretch
+FROM node:8.16.0-stretch
 
 ENV NODE_ENV="production"
 EXPOSE 80
