@@ -27,7 +27,7 @@
       "mbtiles": "columbus_base.mbtiles"
     },
     "data": {
-      "mbtiles": "building_data.mbtiles"
+      "mbtiles": "buildings.mbtiles"
     }
   }
 }
