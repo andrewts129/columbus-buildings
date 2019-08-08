@@ -8,7 +8,7 @@ window.onload = function() {
         let map = new mapboxgl.Map({
             container: 'map',
             center: [-82.9988, 39.9612],
-            zoom: 11,
+            zoom: 12,
             minZoom: 11,
             maxZoom: 16,
             style: tileServerURL + "/styles/base/style.json",
