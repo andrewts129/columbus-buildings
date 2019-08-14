@@ -1,7 +1,6 @@
 FROM node:8.16.0-slim
 
 ENV NODE_ENV="production"
-EXPOSE 8001
 
 RUN apt-get -qq update \
 && DEBIAN_FRONTEND=noninteractive apt-get -y install \
@@ -28,4 +27,5 @@ RUN mkdir -p /usr/src/app && \
 
 COPY . /data
 
+EXPOSE 80
 CMD bash /usr/src/app/run.sh
