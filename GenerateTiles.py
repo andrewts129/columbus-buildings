@@ -1,29 +1,34 @@
-from shapely import geometry, ops, wkt
-import json
-import geojson
-import fiona
-import pyproj
-import subprocess
-import sys
-from functools import partial
-from shapely.strtree import STRtree
-from shapely.prepared import prep
-import multiprocessing as mp
 import itertools
-from datetime import datetime
+import json
 import logging
 import math
-import requests
-import re
+import multiprocessing as mp
 import os
+import re
+import subprocess
+import sys
+import tempfile
+from concurrent.futures.thread import ThreadPoolExecutor
+from datetime import datetime
+from enum import Enum
+from ftplib import FTP
+from functools import partial
+from pathlib import Path
+from typing import Tuple, Union, Dict, Optional, List, Iterable
+from zipfile import ZipFile
 
+import fiona
+import geojson
+import pyproj
+import requests
+from geojson import Feature
+from shapely import geometry, ops, wkt
+from shapely.geometry import Polygon
+from shapely.prepared import prep
+from shapely.strtree import STRtree
 
 GEOJSON_OUT = "viz/buildings.geojson"
 MBTILES_OUT = "viz/buildings.mbtiles"
-
-# From ftp://apps.franklincountyauditor.com/GIS_Shapefiles
-PARCEL_SHAPES_FILE = "data/20190727_Parcel_Polygons/TAXPARCEL_CONDOUNITSTACK_LGIM.shp"
-BUILDING_SHAPES_FILE = "data/20190727_BuildingFootprints/BUILDINGFOOTPRINT.shp"
 
 # From https://gismaps.osu.edu/OSUMaps/Default.html?#
 OSU_BUILDING_DATA_FILE = "data/OhioState/data.gdb"
@@ -43,31 +48,31 @@ OUT_PROJ = pyproj.Proj(init="epsg:4326")
 PROJECT_FRANKLIN = partial(pyproj.transform, IN_PROJ_FRANKLIN, OUT_PROJ)
 PROJECT_OSU = partial(pyproj.transform, IN_PROJ_OSU, OUT_PROJ)
 
-
 logging.basicConfig(filename="loggy.log", format='%(asctime)s %(message)s', level=logging.INFO)
 
 
-class MatchStatus:
+class MatchStatus(Enum):
     NONE = 1
     PARTIAL = 2
     FULL = 3
 
 
-def _contains_letters(s):
+def _contains_letters(s: str) -> bool:
     return any(c.isalpha() for c in s)
 
 
-def _sane_year_built(year):
+def _sane_year_built(year: int) -> bool:
     return 1776 <= int(year) <= 2027
 
 
-def _clean_parcel_id(s):
+def _clean_parcel_id(s: str) -> str:
     if s[-3:] == "-00":
         return s[:-3].strip().replace("-", "")
     else:
         return s.strip().replace("-", "")
 
 
+# TODO typing
 def clean_coordinates(coordinates):
     if isinstance(coordinates, tuple):
         return coordinates[0], coordinates[1]
@@ -75,7 +80,7 @@ def clean_coordinates(coordinates):
         return [clean_coordinates(sublist) for sublist in coordinates]
 
 
-def parse_parcel_feature(parcel_feature):
+def parse_parcel_feature(parcel_feature: Feature) -> Optional[Tuple[str, Dict[str, Union[str, int]]]]:
     parcel_id = parcel_feature["properties"]["PARCELID"]
 
     parcel_year_built = parcel_feature["properties"]["RESYRBLT"]
@@ -93,12 +98,12 @@ def parse_parcel_feature(parcel_feature):
         return None
 
 
-def load_parcels():
+def load_parcels(parcel_shapes_file_name: str) -> Dict[str, Dict[str, Union[str, int]]]:
     parcel_data = {}
 
     pool = mp.Pool()
 
-    with fiona.open(PARCEL_SHAPES_FILE) as features:
+    with fiona.open(parcel_shapes_file_name) as features:
         for result in pool.imap_unordered(parse_parcel_feature, features, chunksize=1000):
             if result is not None:
                 parcel_data[result[0]] = result[1]
@@ -111,19 +116,19 @@ def load_parcels():
     return parcel_data
 
 
-def parse_building_feature(building_feature):
+def parse_building_feature(building_feature: Feature) -> Polygon:
     building_feature["geometry"]["coordinates"] = clean_coordinates(building_feature["geometry"]["coordinates"])
     building_shape = geometry.shape(building_feature["geometry"])
     building_shape = ops.transform(PROJECT_FRANKLIN, building_shape)
     return building_shape
 
 
-def load_buildings():
+def load_buildings(building_shapes_file_name: str) -> List[Polygon]:
     building_shapes = []
 
     pool = mp.Pool()
 
-    with fiona.open(BUILDING_SHAPES_FILE) as features:
+    with fiona.open(building_shapes_file_name) as features:
         for result in pool.imap_unordered(parse_building_feature, features, chunksize=1000):
             building_shapes.append(result)
 
@@ -137,7 +142,7 @@ def load_buildings():
 
 
 def find_matching_parcel_wrapper(args):
-    def find_matching_parcel(building_shape, parcel_shape_tree):
+    def find_matching_parcel(building_shape: Polygon, parcel_shape_tree: STRtree) -> Tuple[MatchStatus, Polygon, Optional[str]]:
         match_status = MatchStatus.PARTIAL
 
         matching_parcel_shape = None
@@ -165,7 +170,7 @@ def find_matching_parcel_wrapper(args):
         return MatchStatus.NONE, args[0], None
 
 
-def match_buildings_to_parcels(parcel_data, building_shapes):
+def match_buildings_to_parcels(parcel_data: Dict[str, Dict[str, Union[str, int]]], building_shapes: List[Polygon]) -> List[Feature]:
     non_matches = 0
     partial_matches = 0
     full_matches = 0
@@ -177,7 +182,9 @@ def match_buildings_to_parcels(parcel_data, building_shapes):
 
     pool = mp.Pool()
 
-    for result in pool.imap_unordered(find_matching_parcel_wrapper, zip(building_shapes, itertools.repeat(parcel_shape_tree)), chunksize=math.ceil(len(building_shapes) / 8)):
+    for result in pool.imap_unordered(find_matching_parcel_wrapper,
+                                      zip(building_shapes, itertools.repeat(parcel_shape_tree)),
+                                      chunksize=math.ceil(len(building_shapes) / 8)):
         match_status, building_shape, matching_parcel_shape_wkt = result
 
         if match_status == MatchStatus.NONE:
@@ -204,7 +211,8 @@ def match_buildings_to_parcels(parcel_data, building_shapes):
         building_features.append(building_feature)
 
         if len(building_features) % 500 == 0:
-            print(f"Matched {str(len(building_features))} buildings to parcel features! (F: {str(full_matches)}, P: {str(partial_matches)}, N: {str(non_matches)})")
+            print(
+                f"Matched {str(len(building_features))} buildings to parcel features! (F: {str(full_matches)}, P: {str(partial_matches)}, N: {str(non_matches)})")
 
     pool.terminate()
     pool.join()
@@ -270,7 +278,8 @@ def load_osu_building_features():
     pool = mp.Pool()
 
     with fiona.open(OSU_BUILDING_DATA_FILE) as features:
-        for result in pool.imap_unordered(parse_osu_building_feature_wrapper, zip(features, itertools.repeat(building_ages)), chunksize=200):
+        for result in pool.imap_unordered(parse_osu_building_feature_wrapper,
+                                          zip(features, itertools.repeat(building_ages)), chunksize=200):
             if result is not None:
                 building_features.append(result)
                 if len(building_features) % 100 == 0:
@@ -283,7 +292,7 @@ def load_osu_building_features():
     return building_features
 
 
-def divide_features_by_dated_status(features):
+def divide_features_by_dated_status(features: Iterable[Feature]) -> Tuple[List[Feature], List[Feature]]:
     dated_building_features = []
     undated_building_features = []
 
@@ -300,8 +309,8 @@ def divide_features_by_dated_status(features):
 
 
 # Returns None is the feature intersects with a dated building, the feature otherwise
-def intersects_with_dated_wrapper(args):
-    def intersects_with_dated(undated_feature, dated_shape_tree):
+def intersects_with_dated_wrapper(args) -> Optional[Feature]:
+    def intersects_with_dated(undated_feature: Feature, dated_shape_tree: STRtree) -> Optional[Feature]:
         undated_building_shape = geometry.shape(undated_feature["geometry"])
         close_dated_shapes = dated_shape_tree.query(undated_building_shape.buffer(0.001))
 
@@ -316,7 +325,7 @@ def intersects_with_dated_wrapper(args):
     return intersects_with_dated(args[0], args[1])
 
 
-def filter_intersecting_undated_buildings(dated_features, undated_features):
+def filter_intersecting_undated_buildings(dated_features: List[Feature], undated_features: List[Feature]) -> List[Feature]:
     dated_building_shapes = [geometry.shape(feature["geometry"]) for feature in dated_features]
     dated_shape_tree = STRtree(dated_building_shapes)
 
@@ -325,7 +334,9 @@ def filter_intersecting_undated_buildings(dated_features, undated_features):
 
     pool = mp.Pool()
 
-    for feature in pool.imap_unordered(intersects_with_dated_wrapper, zip(undated_features, itertools.repeat(dated_shape_tree)), chunksize=math.ceil(len(undated_features) / 8)):
+    for feature in pool.imap_unordered(intersects_with_dated_wrapper,
+                                       zip(undated_features, itertools.repeat(dated_shape_tree)),
+                                       chunksize=math.ceil(len(undated_features) / 8)):
         if feature is None:
             num_intersecting_undateds += 1
         else:
@@ -340,19 +351,79 @@ def filter_intersecting_undated_buildings(dated_features, undated_features):
     return non_intersecting_undateds
 
 
+def download_franklin_county_building_footprints(data_dir: str) -> str:
+    with FTP('apps.franklincountyauditor.com') as ftp:
+        ftp.login()
+        ftp.cwd('GIS_Shapefiles')
+        ftp.cwd('CurrentExtracts')
+
+        building_footprint_file_name = next(file_name for file_name in ftp.nlst() if 'BuildingFootprints' in file_name)
+        output_folder = f'{data_dir}/{building_footprint_file_name}'.replace('.zip', '')
+
+        # Only downloads if the unzipped contents don't exist already
+        if not Path(output_folder).is_dir():
+            with tempfile.TemporaryDirectory() as temp_dir_name:
+                zip_file_name = f'{temp_dir_name}/{building_footprint_file_name}'
+                with open(zip_file_name, 'wb') as fp:
+                    ftp.retrbinary(f'RETR {building_footprint_file_name}', fp.write)
+                with ZipFile(zip_file_name) as zip_ref:
+                    zip_ref.extractall(output_folder)
+
+    return output_folder
+
+
+def download_franklin_county_parcel_polygons(data_dir: str) -> str:
+    with FTP('apps.franklincountyauditor.com') as ftp:
+        ftp.login()
+        ftp.cwd('GIS_Shapefiles')
+        ftp.cwd('CurrentExtracts')
+
+        parcel_polygons_file_name = next(file_name for file_name in ftp.nlst() if 'Parcel_Polygons' in file_name)
+        output_folder = f'{data_dir}/{parcel_polygons_file_name}'.replace('.zip', '')
+
+        # Only downloads if the unzipped contents don't exist already
+        if not Path(output_folder).is_dir():
+            with tempfile.TemporaryDirectory() as temp_dir_name:
+                zip_file_name = f'{temp_dir_name}/{parcel_polygons_file_name}'
+                with open(zip_file_name, 'wb') as fp:
+                    ftp.retrbinary(f'RETR {parcel_polygons_file_name}', fp.write)
+                with ZipFile(zip_file_name) as zip_ref:
+                    zip_ref.extractall(output_folder)
+
+    return output_folder
+
+
 def main():
     start_time = datetime.now()
 
+    data_dir = './data'
+    os.makedirs(data_dir, exist_ok=True)
+
     osu_building_features = load_osu_building_features()
 
-    franklin_parcel_data = load_parcels()
-    franklin_building_shapes = load_buildings()
+    # Download in parallel
+    with ThreadPoolExecutor(2) as executor:
+        future_footprint_dir_name = executor.submit(download_franklin_county_building_footprints, data_dir)
+        future_parcels_dir_name = executor.submit(download_franklin_county_parcel_polygons, data_dir)
+        # future_osu_data_dir_name = executor.submit(download_osu_data, data_dir) TODO
+
+        timeout = 300
+        footprint_dir_name = future_footprint_dir_name.result(timeout)
+        parcels_dir_name = future_parcels_dir_name.result(timeout)
+        # osu_data_dir_name = future_osu_data_file_name.result(timeout) TODO
+
+    footprint_file_name = f'{footprint_dir_name}/BUILDINGFOOTPRINT.shp'
+    parcels_file_name = f'{parcels_dir_name}/TAXPARCEL_CONDOUNITSTACK_LGIM.shp'
+
+    franklin_building_shapes = load_buildings(footprint_file_name)
+    franklin_parcel_data = load_parcels(parcels_file_name)
     franklin_building_features = match_buildings_to_parcels(franklin_parcel_data, franklin_building_shapes)
 
     all_building_features = itertools.chain(osu_building_features, franklin_building_features)
     dated_building_features, undated_building_features = divide_features_by_dated_status(all_building_features)
 
-    undated_building_features = filter_intersecting_undated_buildings(dated_building_features, undated_building_features)
+    undated_building_features = filter_intersecting_undated_buildings(dated_building_features,
+                                                                      undated_building_features)
     print(f"Keeping {len(undated_building_features)} buildings without dates...")
 
     final_building_features = dated_building_features + undated_building_features
