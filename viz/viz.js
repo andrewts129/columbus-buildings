@@ -3,7 +3,7 @@ window.onload = function() {
         window.alert("Sorry, your browser doesn't support the map on this page")
     }
     else {
-        const tileServerURL = "http://localhost:8080";
+        const tileServerURL = "http://localhost:8001";
 
         let map = new mapboxgl.Map({
             container: 'map',

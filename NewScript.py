@@ -1,4 +1,6 @@
 import os
+import subprocess
+import sys
 import tempfile
 from concurrent.futures.thread import ThreadPoolExecutor
 from ftplib import FTP
@@ -70,8 +72,7 @@ def load_footprints(footprint_file_name: str) -> GeoDataFrame:
         df = GeoDataFrame.from_features(features_slimmed(features, properties_to_keep))
         df.crs = features.crs
 
-    df.to_crs(epsg=4326)
-    return df
+    return df.to_crs(epsg=4326)
 
 
 def load_parcels(parcel_file_name: str) -> GeoDataFrame:
@@ -82,8 +83,7 @@ def load_parcels(parcel_file_name: str) -> GeoDataFrame:
         df = GeoDataFrame.from_features(slim_features)
         df.crs = features.crs
 
-    df.to_crs(epsg=4326)
-    return df
+    return df.to_crs(epsg=4326)
 
 
 def contains_letters(s: str) -> bool:
@@ -140,6 +140,12 @@ def main():
 
     print(footprints_with_years.head())
     print(footprints_with_years.describe())
+
+    output_geojson_file_name = f'{data_dir}/buildings.geojson'
+    output_mbtiles_file_name = f'{data_dir}/buildings.mbtiles'
+    footprints_with_years.to_file(output_geojson_file_name, driver='GeoJSON')
+    subprocess.call(["bash", "tippecanoe_cmd.sh", output_mbtiles_file_name, output_geojson_file_name], stderr=sys.stderr, stdout=sys.stdout)
+
     print('done!')
 
 
