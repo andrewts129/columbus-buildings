@@ -2,6 +2,7 @@
 data/
 *.geojson
 venv/
-*.mbtiles
+**/buildings.mbtiles
+viz/columbus.mbtiles
 *.log
 tileserver/*.sh
