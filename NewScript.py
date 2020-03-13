@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+import logging
 import os
 import subprocess
 import sys
@@ -10,8 +12,13 @@ from zipfile import ZipFile
 
 import fiona
 import geopandas as gpd
-from geojson import Feature
 from geopandas import GeoDataFrame
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+handler = logging.StreamHandler(sys.stdout)
+handler.setLevel(logging.DEBUG)
+logger.addHandler(handler)
 
 
 def download_franklin_county_building_footprints(data_dir: str) -> str:
@@ -25,6 +32,7 @@ def download_franklin_county_building_footprints(data_dir: str) -> str:
 
         # Only downloads if the unzipped contents don't exist already
         if not Path(output_folder).is_dir():
+            logger.debug(f'Downloading {building_footprint_file_name}...')
             with tempfile.TemporaryDirectory() as temp_dir_name:
                 zip_file_name = f'{temp_dir_name}/{building_footprint_file_name}'
                 with open(zip_file_name, 'wb') as fp:
@@ -32,7 +40,9 @@ def download_franklin_county_building_footprints(data_dir: str) -> str:
                 with ZipFile(zip_file_name) as zip_ref:
                     zip_ref.extractall(output_folder)
 
+    logger.debug(f'Using {building_footprint_file_name}...')
     return output_folder
+
 
 def download_franklin_county_parcel_polygons(data_dir: str) -> str:
     with FTP('apps.franklincountyauditor.com') as ftp:
@@ -45,6 +55,7 @@ def download_franklin_county_parcel_polygons(data_dir: str) -> str:
 
         # Only downloads if the unzipped contents don't exist already
         if not Path(output_folder).is_dir():
+            logger.debug(f'Downloading {parcel_polygons_file_name}...')
             with tempfile.TemporaryDirectory() as temp_dir_name:
                 zip_file_name = f'{temp_dir_name}/{parcel_polygons_file_name}'
                 with open(zip_file_name, 'wb') as fp:
@@ -52,6 +63,7 @@ def download_franklin_county_parcel_polygons(data_dir: str) -> str:
                 with ZipFile(zip_file_name) as zip_ref:
                     zip_ref.extractall(output_folder)
 
+    logger.debug(f'Using {parcel_polygons_file_name}...')
     return output_folder
 
 
@@ -78,8 +90,8 @@ def load_footprints(footprint_file_name: str) -> GeoDataFrame:
 def load_parcels(parcel_file_name: str) -> GeoDataFrame:
     with fiona.open(parcel_file_name) as features:
         properties_to_keep = ['PARCELID', 'RESYRBLT']
-        slim_features = features_slimmed(features, properties_to_keep)
-        slim_features = (f for f in slim_features if f['geometry'] is not None)  # Apparently there are things in here with no shape
+        slim_features = features_slimmed(features, properties_to_keep)  # Reduces memory usage
+        slim_features = (f for f in slim_features if f['geometry'] is not None)  # Apparently there are things in here with no shape?
         df = GeoDataFrame.from_features(slim_features)
         df.crs = features.crs
 
@@ -124,27 +136,35 @@ def main():
         footprint_dir_name = future_footprint_dir_name.result(timeout)
         parcels_dir_name = future_parcels_dir_name.result(timeout)
 
-    print('Downloaded data...')
+    logger.info('Downloaded data...')
 
     footprint_file_name = f'{footprint_dir_name}/BUILDINGFOOTPRINT.shp'
     parcels_file_name = f'{parcels_dir_name}/TAXPARCEL_CONDOUNITSTACK_LGIM.shp'
 
     footprints = load_footprints(footprint_file_name)
+    logger.debug(footprints.head())
+    logger.debug(footprints.info())
+
     parcels = clean_parcel_data_frame(load_parcels(parcels_file_name))
+    logger.debug(parcels.head())
+    logger.debug(parcels.info())
+    logger.debug(parcels.describe())
 
-    print('Loaded data...')
+    logger.info('Loaded data...')
 
-    footprints_with_years = gpd.sjoin(footprints, parcels, op='within', how='left')
+    # TODO does this actually work?
+    footprints_with_years = gpd.sjoin(footprints, parcels, op='intersects', how='left')
+    logger.debug(footprints_with_years.head())
+    logger.debug(footprints_with_years.info())
+    logger.debug(footprints_with_years.describe())
 
-    print('Joined data...')
-
-    print(footprints_with_years.head())
-    print(footprints_with_years.describe())
+    logger.info('Joined data...')
 
     output_geojson_file_name = f'{data_dir}/buildings.geojson'
     output_mbtiles_file_name = f'{data_dir}/buildings.mbtiles'
     footprints_with_years.to_file(output_geojson_file_name, driver='GeoJSON')
-    subprocess.call(["bash", "tippecanoe_cmd.sh", output_mbtiles_file_name, output_geojson_file_name], stderr=sys.stderr, stdout=sys.stdout)
+    subprocess.call(['bash', 'tippecanoe_cmd.sh', output_mbtiles_file_name, output_geojson_file_name],
+                    stderr=sys.stderr, stdout=sys.stdout)
 
     print('done!')
 
