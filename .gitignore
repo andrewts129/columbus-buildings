@@ -5,4 +5,6 @@ venv/
 **/buildings.mbtiles
 viz/columbus.mbtiles
 *.log
-tileserver/*.sh
+old/
+
+!tileserver/data
