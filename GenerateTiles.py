@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
+import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -12,6 +14,8 @@ from zipfile import ZipFile
 
 import fiona
 import geopandas as gpd
+import pandas as pd
+import requests
 from geopandas import GeoDataFrame
 
 logger = logging.getLogger(__name__)
@@ -91,9 +95,56 @@ def load_parcels(parcel_file_name: str) -> GeoDataFrame:
     with fiona.open(parcel_file_name) as features:
         properties_to_keep = ['PARCELID', 'RESYRBLT']
         slim_features = features_slimmed(features, properties_to_keep)  # Reduces memory usage
-        slim_features = (f for f in slim_features if f['geometry'] is not None)  # Apparently there are things in here with no shape?
+        slim_features = (f for f in slim_features if
+                         f['geometry'] is not None)  # Apparently there are things in here with no shape?
         df = GeoDataFrame.from_features(slim_features)
         df.crs = features.crs
+
+    return df.to_crs(epsg=4326)
+
+
+def download_osu_buildings_ages(building_file_name: str, data_dir: str) -> GeoDataFrame:
+    def fetch_building_age(building_number: str) -> int:
+        response = requests.get(
+            f"https://gismaps.osu.edu/OSUDataService/OSUService.svc/BuildingDetailsExtended/{building_number}")
+        build_year_group = re.search('"Date Constructed":"(\\d*)/', response.text)
+        if build_year_group is None:
+            return 0
+        else:
+            return int(build_year_group.group(1))
+
+    age_cache_file_name = f"{data_dir}/OhioState/ages.json"
+
+    if os.path.isfile(age_cache_file_name):
+        with open(age_cache_file_name, "r") as f:
+            building_ages = json.load(f)
+            logging.debug(f"Loaded {len(building_ages)} OSU building ages from cache at {age_cache_file_name}...")
+    else:
+        building_ages = {}
+        with fiona.open(building_file_name) as features:
+            building_numbers = [str(feature["properties"]["BLDG_NUM"]) for feature in features]
+
+            # Not parallelized to avoid rate-limiting
+            for num in building_numbers:
+                if num != "None" and num != "0" and num != "x":
+                    building_ages[num] = fetch_building_age(num)
+                    logging.debug(f"Loaded {len(building_ages)} OSU building ages from https://gismaps.osu.edu...")
+
+        logging.debug(f"Writing {len(building_ages)} OSU building ages to cache at {age_cache_file_name}...")
+        with open(age_cache_file_name, "w") as f:
+            json.dump(building_ages, f)
+
+    return gpd.GeoDataFrame(building_ages.items(), columns=['BLDG_NUM', 'year_built'])
+
+
+def load_osu_buildings(building_file_name: str, data_dir: str) -> GeoDataFrame:
+    with fiona.open(building_file_name) as features:
+        df = GeoDataFrame.from_features(features)
+        df.crs = features.crs
+
+    building_ages = download_osu_buildings_ages(building_file_name, data_dir)
+    df = df.merge(building_ages, on='BLDG_NUM')
+    df = df[['geometry', 'year_built']]  # Remove all the columns we don't need
 
     return df.to_crs(epsg=4326)
 
@@ -127,16 +178,22 @@ def main():
     data_dir = './data'
     os.makedirs(data_dir, exist_ok=True)
 
-    # Download in parallel TODO get osu data too
-    with ThreadPoolExecutor(2) as executor:
+    # Download in parallel
+    with ThreadPoolExecutor(3) as executor:
+        future_osu_buildings = executor.submit(load_osu_buildings, f'{data_dir}/OhioState/data.gdb', data_dir)
         future_footprint_dir_name = executor.submit(download_franklin_county_building_footprints, data_dir)
         future_parcels_dir_name = executor.submit(download_franklin_county_parcel_polygons, data_dir)
 
         timeout = 300
+        osu_buildings = future_osu_buildings.result(timeout)
         footprint_dir_name = future_footprint_dir_name.result(timeout)
         parcels_dir_name = future_parcels_dir_name.result(timeout)
 
     logger.info('Downloaded data...')
+
+    logger.debug(osu_buildings.head())
+    logger.debug(osu_buildings.info())
+    logger.debug(osu_buildings.describe())
 
     footprint_file_name = f'{footprint_dir_name}/BUILDINGFOOTPRINT.shp'
     parcels_file_name = f'{parcels_dir_name}/TAXPARCEL_CONDOUNITSTACK_LGIM.shp'
@@ -157,11 +214,19 @@ def main():
     logger.debug(footprints_with_years.info())
     logger.debug(footprints_with_years.describe())
 
+    final_df = GeoDataFrame(pd.concat([footprints_with_years, osu_buildings], ignore_index=True),
+                            crs=footprints_with_years.crs)
+    final_df = final_df[['geometry', 'year_built']]  # Remove all the columns we don't need
+    logger.debug(final_df.head())
+    logger.debug(final_df.info())
+    logger.debug(final_df.describe())
+
     logger.info('Joined data...')
 
+    # TODO do something about duplicate buildings
     output_geojson_file_name = f'{data_dir}/buildings.geojson'
     output_mbtiles_file_name = f'{data_dir}/buildings.mbtiles'
-    footprints_with_years.to_file(output_geojson_file_name, driver='GeoJSON')
+    final_df.to_file(output_geojson_file_name, driver='GeoJSON')
     subprocess.call(['bash', 'tippecanoe_cmd.sh', output_mbtiles_file_name, output_geojson_file_name],
                     stderr=sys.stderr, stdout=sys.stdout)
 
