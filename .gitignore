@@ -6,5 +6,6 @@ venv/
 viz/columbus.mbtiles
 *.log
 old/
+rsync_scientist.sh
 
 !tileserver/data

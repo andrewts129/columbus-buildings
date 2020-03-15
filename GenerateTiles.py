@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import itertools
 import json
 import logging
 import os
@@ -6,23 +7,26 @@ import re
 import subprocess
 import sys
 import tempfile
+import multiprocessing as mp
+import time
 from concurrent.futures.thread import ThreadPoolExecutor
 from ftplib import FTP
+from multiprocessing.managers import Namespace
 from pathlib import Path
-from typing import Iterable, Hashable, Dict
+from typing import Iterable, Hashable, Dict, Tuple, Optional
 from zipfile import ZipFile
 
 import fiona
 import geopandas as gpd
 import pandas as pd
 import requests
-from geopandas import GeoDataFrame
+from geopandas import GeoDataFrame, GeoSeries
+from shapely.geometry import Polygon
+from shapely.prepared import prep
+from shapely.strtree import STRtree
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
-handler = logging.StreamHandler(sys.stdout)
-handler.setLevel(logging.DEBUG)
-logger.addHandler(handler)
 
 
 def download_franklin_county_building_footprints(data_dir: str) -> str:
@@ -174,6 +178,60 @@ def clean_parcel_data_frame(df: GeoDataFrame) -> GeoDataFrame:
     return new_df
 
 
+def concat(gdf1: GeoDataFrame, gdf2: GeoDataFrame) -> GeoDataFrame:
+    return GeoDataFrame(pd.concat([gdf1, gdf2], ignore_index=True), crs=gdf1.crs)
+
+
+# Returns None if the shape intersects with a dated building, the shape otherwise
+def remove_if_intersects_with_dated(args: Tuple[Polygon, Namespace]) -> Optional[Polygon]:
+    undated_building_shape, shared_memory = args
+    close_dated_shapes = shared_memory.tree.query(undated_building_shape.buffer(0.001))
+
+    undated_building_shape_prep = prep(undated_building_shape)
+
+    for close_dated_shape in close_dated_shapes:
+        if undated_building_shape_prep.intersects(close_dated_shape):
+            return None
+
+    return undated_building_shape  # Doesn't intersect with anything
+
+
+# TODO this approach sucks
+def filter_intersecting_undated_buildings(df: GeoDataFrame) -> GeoDataFrame:
+    dated_mask = df['year_built'] > 0
+    dated = df[dated_mask]
+    undated = df[~dated_mask]
+
+    dated_shape_tree = STRtree(dated.geometry)
+    logger.debug('made tree')
+
+    start = time.time()
+
+    filtered_undated_shapes = []
+    for i, undated_building_shape in enumerate(undated.geometry):
+        close_dated_shapes = dated_shape_tree.query(undated_building_shape.buffer(0.0001))
+
+        # Only prep if there are multiple nearby shapes to check
+        undated_building_shape_prep = prep(undated_building_shape) if len(close_dated_shapes) > 1 else undated_building_shape
+
+        keep = True
+        for close_dated_shape in close_dated_shapes:
+            if undated_building_shape_prep.intersects(close_dated_shape):
+                keep = False
+                break
+
+        if keep:
+            filtered_undated_shapes.append(undated_building_shape)
+        if i % 1000 == 0:
+            logger.debug(f'Discarded {i - len(filtered_undated_shapes) + 1} undated buildings, kept {len(filtered_undated_shapes)}')
+        if i == 5000:
+            logger.info(f'That took {time.time() - start}')
+
+    # Rebuilds the dataframe
+    filtered_undated = GeoDataFrame(zip(filtered_undated_shapes, itertools.repeat(0)), columns=['geometry', 'year_built'])
+    return concat(dated, filtered_undated)
+
+
 def main():
     data_dir = './data'
     os.makedirs(data_dir, exist_ok=True)
@@ -210,18 +268,25 @@ def main():
     logger.info('Loaded data...')
 
     footprints_with_years = gpd.sjoin(footprints, parcels, op='intersects', how='left')
+    footprints_with_years = footprints_with_years[['geometry', 'year_built']]
+    footprints_with_years = footprints_with_years.fillna(0)
     logger.debug(footprints_with_years.head())
     logger.debug(footprints_with_years.info())
     logger.debug(footprints_with_years.describe())
 
-    final_df = GeoDataFrame(pd.concat([footprints_with_years, osu_buildings], ignore_index=True),
-                            crs=footprints_with_years.crs)
-    final_df = final_df[['geometry', 'year_built']]  # Remove all the columns we don't need
+    combined_df = concat(footprints_with_years, osu_buildings)
+    logger.debug(combined_df.head())
+    logger.debug(combined_df.info())
+    logger.debug(combined_df.describe())
+
+    logger.info('Joined data...')
+
+    final_df = filter_intersecting_undated_buildings(combined_df)
     logger.debug(final_df.head())
     logger.debug(final_df.info())
     logger.debug(final_df.describe())
 
-    logger.info('Joined data...')
+    logger.info('Removed duplicates...')
 
     # TODO do something about duplicate buildings
     output_geojson_file_name = f'{data_dir}/buildings.geojson'
