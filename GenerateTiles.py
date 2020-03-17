@@ -176,6 +176,28 @@ def concat(*dataframes: GeoDataFrame) -> GeoDataFrame:
     return GeoDataFrame(pd.concat([*dataframes], ignore_index=True), crs=dataframes[0].crs)
 
 
+def sort_by_render_priority(gdf: GeoDataFrame) -> GeoDataFrame:
+    undated = gdf[gdf['year_built'] == 0]
+    dated = gdf[gdf['year_built'] > 0]
+    
+    return concat(dated.sort_values('year_built'), undated)
+
+
+def filter_intersecting_buildings(gdf: GeoDataFrame) -> GeoDataFrame:
+    logger.debug('start sort')
+    sorted_gdf = sort_by_render_priority(gdf)
+    logger.debug('end sort')
+
+    logger.debug('start wkt')
+    sorted_gdf['wkt'] = sorted_gdf['geometry'].apply(lambda x: str(x))
+    logger.debug('end wkt')
+    logger.debug('start dissolve')
+    filtered_gdf = sorted_gdf.dissolve(by='wkt', aggfunc='first')
+    logger.debug('end dissolve')
+
+    return filtered_gdf
+
+
 def main():
     data_dir = './data'
     os.makedirs(data_dir, exist_ok=True)
@@ -225,10 +247,14 @@ def main():
 
     logger.info('Joined data...')
 
-    # TODO do something about duplicate buildings
+    final_df = filter_intersecting_buildings(combined_df)
+    logger.debug(final_df.head())
+    logger.debug(final_df.info())
+    logger.debug(final_df.describe())
+
     output_geojson_file_name = f'{data_dir}/buildings.geojson'
     output_mbtiles_file_name = f'{data_dir}/buildings.mbtiles'
-    combined_df.to_file(output_geojson_file_name, driver='GeoJSON')
+    final_df.to_file(output_geojson_file_name, driver='GeoJSON')
     subprocess.call(['bash', 'tippecanoe_cmd.sh', output_mbtiles_file_name, output_geojson_file_name],
                     stderr=sys.stderr, stdout=sys.stdout)
 
