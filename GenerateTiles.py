@@ -8,6 +8,7 @@ import sys
 import tempfile
 from concurrent.futures.thread import ThreadPoolExecutor
 from ftplib import FTP
+from io import StringIO
 from pathlib import Path
 from typing import Iterable, Hashable, Dict
 from zipfile import ZipFile
@@ -66,6 +67,14 @@ def download_franklin_county_parcel_polygons(data_dir: str) -> str:
 
     logger.debug(f'Using {parcel_polygons_file_name}...')
     return output_folder
+
+
+def log_data_frame(gdf: GeoDataFrame) -> None:
+    logger.debug(gdf.head())
+
+    buffer = StringIO()
+    gdf.info(buf=buffer)
+    logger.debug(buffer.getvalue())
 
 
 def select_keys(d: Dict, keys_to_keep: Iterable[Hashable]) -> Dict:
@@ -184,16 +193,10 @@ def sort_by_render_priority(gdf: GeoDataFrame) -> GeoDataFrame:
 
 
 def filter_intersecting_buildings(gdf: GeoDataFrame) -> GeoDataFrame:
-    logger.debug('start sort')
     sorted_gdf = sort_by_render_priority(gdf)
-    logger.debug('end sort')
 
-    logger.debug('start wkt')
     sorted_gdf['wkt'] = sorted_gdf['geometry'].apply(lambda x: str(x))
-    logger.debug('end wkt')
-    logger.debug('start dissolve')
     filtered_gdf = sorted_gdf.dissolve(by='wkt', aggfunc='first')
-    logger.debug('end dissolve')
 
     return filtered_gdf
 
@@ -214,43 +217,31 @@ def main():
         parcels_dir_name = future_parcels_dir_name.result(timeout)
 
     logger.info('Downloaded data...')
-
-    logger.debug(osu_buildings.head())
-    logger.debug(osu_buildings.info())
-    logger.debug(osu_buildings.describe())
+    log_data_frame(osu_buildings)
 
     footprint_file_name = f'{footprint_dir_name}/BUILDINGFOOTPRINT.shp'
     parcels_file_name = f'{parcels_dir_name}/TAXPARCEL_CONDOUNITSTACK_LGIM.shp'
 
     footprints = load_footprints(footprint_file_name)
-    logger.debug(footprints.head())
-    logger.debug(footprints.info())
+    log_data_frame(footprints)
 
     parcels = clean_parcel_data_frame(load_parcels(parcels_file_name))
-    logger.debug(parcels.head())
-    logger.debug(parcels.info())
-    logger.debug(parcels.describe())
+    log_data_frame(parcels)
 
     logger.info('Loaded data...')
 
     footprints_with_years = gpd.sjoin(footprints, parcels, op='intersects', how='left')
     footprints_with_years = footprints_with_years[['geometry', 'year_built']]
     footprints_with_years = footprints_with_years.fillna(0)
-    logger.debug(footprints_with_years.head())
-    logger.debug(footprints_with_years.info())
-    logger.debug(footprints_with_years.describe())
+    log_data_frame(footprints_with_years)
 
     combined_df = concat(footprints_with_years, osu_buildings)
-    logger.debug(combined_df.head())
-    logger.debug(combined_df.info())
-    logger.debug(combined_df.describe())
+    log_data_frame(combined_df)
 
     logger.info('Joined data...')
 
     final_df = filter_intersecting_buildings(combined_df)
-    logger.debug(final_df.head())
-    logger.debug(final_df.info())
-    logger.debug(final_df.describe())
+    log_data_frame(final_df)
 
     output_geojson_file_name = f'{data_dir}/buildings.geojson'
     output_mbtiles_file_name = f'{data_dir}/buildings.mbtiles'
