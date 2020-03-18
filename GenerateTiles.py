@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from concurrent.futures.thread import ThreadPoolExecutor
 from ftplib import FTP
 from io import StringIO
@@ -94,7 +95,7 @@ def load_footprints(footprint_file_name: str) -> GeoDataFrame:
         df = GeoDataFrame.from_features(features_slimmed(features, properties_to_keep))
         df.crs = features.crs
 
-    return df.to_crs(epsg=4326)
+    return remove_invalid_geometries(df.to_crs(epsg=4326))
 
 
 def load_parcels(parcel_file_name: str) -> GeoDataFrame:
@@ -105,7 +106,7 @@ def load_parcels(parcel_file_name: str) -> GeoDataFrame:
         gdf = GeoDataFrame.from_features(slim_features)
         gdf.crs = features.crs
 
-    return gdf.to_crs(epsg=4326)
+    return remove_invalid_geometries(gdf.to_crs(epsg=4326))
 
 
 def download_osu_buildings_ages(building_file_name: str, data_dir: str) -> GeoDataFrame:
@@ -153,7 +154,11 @@ def load_osu_buildings(building_file_name: str, data_dir: str) -> GeoDataFrame:
     gdf = gdf.merge(building_ages, on='BLDG_NUM')
     gdf = gdf[['geometry', 'year_built']]  # Remove all the columns we don't need
 
-    return gdf.to_crs(epsg=4326)
+    return remove_invalid_geometries(gdf.to_crs(epsg=4326))
+
+
+def remove_invalid_geometries(gdf: GeoDataFrame) -> GeoDataFrame:
+    return gdf[gdf.geometry.is_valid]
 
 
 def contains_letters(s: str) -> bool:
@@ -181,6 +186,39 @@ def clean_parcel_data_frame(gdf: GeoDataFrame) -> GeoDataFrame:
     return new_gdf
 
 
+# This is really slow but it works great
+def join_footprints_parcels(footprints: GeoDataFrame, parcels: GeoDataFrame) -> GeoDataFrame:
+    parcels_sindex = parcels.sindex
+
+    corresponding_parcel_ids = []
+    for index, row in footprints.iterrows():
+        footprint = row['geometry']
+
+        nearby_parcels_indexes = list(parcels_sindex.intersection(footprint.bounds))
+        nearby_parcels = parcels.iloc[nearby_parcels_indexes]
+
+        if len(nearby_parcels) == 0:
+            corresponding_parcel_ids.append(None)
+        else:
+            footprint_area = footprint.area
+
+            intersection_ratios = [footprint.intersection(parcel).area / footprint_area for parcel in nearby_parcels['geometry']]
+            if all(ratio == 0 for ratio in intersection_ratios):
+                corresponding_parcel_ids.append(None)
+            else:
+                corresponding_parcel_index = max(zip(nearby_parcels_indexes, intersection_ratios), key=lambda x: x[1])[0]
+                corresponding_parcel_ids.append(parcels.iloc[corresponding_parcel_index]['parcel_id'])
+
+        if len(corresponding_parcel_ids) % 1000 == 0:
+            logger.debug(f'Join progress: {len(corresponding_parcel_ids)}')
+
+    footprints['parcel_id'] = corresponding_parcel_ids
+    merged = footprints.merge(parcels, on='parcel_id', how='left')
+    merged = merged.rename(columns={'geometry_x': 'geometry'})
+    merged = gpd.GeoDataFrame(merged[['geometry', 'year_built']])
+    return merged.fillna(0)
+
+
 def concat(*dataframes: GeoDataFrame) -> GeoDataFrame:
     return GeoDataFrame(pd.concat([*dataframes], ignore_index=True), crs=dataframes[0].crs)
 
@@ -192,6 +230,8 @@ def sort_by_render_priority(gdf: GeoDataFrame) -> GeoDataFrame:
     return concat(dated.sort_values('year_built'), undated)
 
 
+# TODO add buffer so nearly intersecting buildings also get filtered
+# TODO is this actually needed since we have the new join method?
 def filter_intersecting_buildings(gdf: GeoDataFrame) -> GeoDataFrame:
     sorted_gdf = sort_by_render_priority(gdf)
 
@@ -230,18 +270,16 @@ def main():
 
     logger.info('Loaded data...')
 
-    footprints_with_years = gpd.sjoin(footprints, parcels, op='intersects', how='left')
-    footprints_with_years = footprints_with_years[['geometry', 'year_built']]
-    footprints_with_years = footprints_with_years.fillna(0)
+    footprints_with_years = join_footprints_parcels(footprints, parcels)
     log_data_frame(footprints_with_years)
 
     combined_df = concat(footprints_with_years, osu_buildings)
     log_data_frame(combined_df)
 
-    logger.info('Joined data...')
-
     final_df = filter_intersecting_buildings(combined_df)
     log_data_frame(final_df)
+
+    logger.info('Joined data...')
 
     output_geojson_file_name = f'{data_dir}/buildings.geojson'
     output_mbtiles_file_name = f'{data_dir}/buildings.mbtiles'
