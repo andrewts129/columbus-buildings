@@ -6,7 +6,6 @@ import re
 import subprocess
 import sys
 import tempfile
-import time
 from concurrent.futures.thread import ThreadPoolExecutor
 from ftplib import FTP
 from io import StringIO
@@ -146,6 +145,7 @@ def download_osu_buildings_ages(building_file_name: str, data_dir: str) -> GeoDa
 
 
 def load_osu_buildings(building_file_name: str, data_dir: str) -> GeoDataFrame:
+    # TODO find a way to download this file
     with fiona.open(building_file_name) as features:
         gdf = GeoDataFrame.from_features(features)
         gdf.crs = features.crs
