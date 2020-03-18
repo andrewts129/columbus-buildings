@@ -1,0 +1,33 @@
+{
+  "options": {
+    "paths": {
+      "root": "",
+      "fonts": "fonts",
+      "sprites": "sprites",
+      "styles": "styles",
+      "mbtiles": ""
+    },
+    "formatQuality": {
+      "jpeg": 80,
+      "webp": 90
+    },
+    "maxScaleFactor": 3,
+    "maxSize": 2048,
+    "pbfAlias": "pbf",
+    "serveAllFonts": false,
+    "serveStaticMaps": true
+  },
+  "styles": {
+    "base": {
+      "style": "base_style.json"
+    }
+  },
+  "data": {
+    "columbus": {
+      "mbtiles": "columbus_base.mbtiles"
+    },
+    "buildings": {
+      "mbtiles": "buildings.mbtiles"
+    }
+  }
+}
