@@ -12,6 +12,8 @@ from io import StringIO
 from pathlib import Path
 from typing import Iterable, Hashable, Dict
 from zipfile import ZipFile
+from shapely.prepared import prep
+from shapely.geometry import shape
 
 import fiona
 import geopandas as gpd
@@ -67,6 +69,19 @@ def download_franklin_county_parcel_polygons(data_dir: str) -> str:
 
     logger.debug(f'Using {parcel_polygons_file_name}...')
     return output_folder
+
+
+def download_ohio_building_footprints(data_dir: str) -> str:
+    # TODO implement this for real https://usbuildingdata.blob.core.windows.net/usbuildings-v1-1/Ohio.zip
+    if not Path(data_dir, 'Ohio', 'Ohio.geojson').exists():
+        logger.debug('Need to download Ohio.geojson')
+
+    return f'{data_dir}/Ohio/Ohio.geojson'
+
+
+def download_county_outlines(data_dir: str) -> str:
+    # TODO implement this for real https://www2.census.gov/geo/tiger/GENZ2018/shp/cb_2018_us_county_500k.zip
+    return f'{data_dir}/cb_2018_us_county_500k/cb_2018_us_county_500k.shp'
 
 
 def log_data_frame(gdf: GeoDataFrame) -> None:
@@ -155,6 +170,29 @@ def load_osu_buildings(building_file_name: str, data_dir: str) -> GeoDataFrame:
     gdf = gdf[['geometry', 'year_built']]  # Remove all the columns we don't need
 
     return remove_invalid_geometries(gdf.to_crs(epsg=4326))
+
+
+def load_neighboring_counties_shapes(county_outlines_file_name: str) -> GeoDataFrame:
+    outer_counties_names = ['Union', 'Delaware', 'Licking', 'Fairfield', 'Pickaway', 'Madison']
+
+    with fiona.open(county_outlines_file_name) as features:
+        gdf = GeoDataFrame.from_features(features)
+
+    ohio_counties = gdf[gdf.STATEFP == '39']
+    neighboring_counties = ohio_counties[ohio_counties.NAME.isin(outer_counties_names)]
+    return neighboring_counties[['geometry']]  # Remove all the columns we don't need
+
+
+def load_non_franklin_county_building_footprints(all_ohio_footprint_file_name: str, county_outlines_file_name: str) -> GeoDataFrame:
+    neighboring_counties_shapes = load_neighboring_counties_shapes(county_outlines_file_name)
+    all_neighboring_counties_shape = prep(neighboring_counties_shapes['geometry'].unary_union)
+
+    with fiona.open(all_ohio_footprint_file_name) as features:
+        relevant_features = (f for f in features if all_neighboring_counties_shape.intersects(shape(f['geometry'])))
+        neighboring_counties_building_footprints = GeoDataFrame.from_features(relevant_features)
+
+    neighboring_counties_building_footprints[['year_built']] = 0
+    return neighboring_counties_building_footprints
 
 
 def remove_invalid_geometries(gdf: GeoDataFrame) -> GeoDataFrame:
@@ -250,11 +288,15 @@ def main():
         future_osu_buildings = executor.submit(load_osu_buildings, f'{data_dir}/OhioState/data.gdb', data_dir)
         future_footprint_dir_name = executor.submit(download_franklin_county_building_footprints, data_dir)
         future_parcels_dir_name = executor.submit(download_franklin_county_parcel_polygons, data_dir)
+        future_all_ohio_footprints_file_name = executor.submit(download_ohio_building_footprints, data_dir)
+        future_county_outlines_file_name = executor.submit(download_county_outlines, data_dir)
 
         timeout = 300
         osu_buildings = future_osu_buildings.result(timeout)
         footprint_dir_name = future_footprint_dir_name.result(timeout)
         parcels_dir_name = future_parcels_dir_name.result(timeout)
+        all_ohio_footprints_file_name = future_all_ohio_footprints_file_name.result(timeout)
+        county_outlines_file_name = future_county_outlines_file_name.result(timeout)
 
     logger.info('Downloaded data...')
     log_data_frame(osu_buildings)
@@ -270,10 +312,13 @@ def main():
 
     logger.info('Loaded data...')
 
-    footprints_with_years = join_footprints_parcels(footprints, parcels)
-    log_data_frame(footprints_with_years)
+    franklin_county_footprints = join_footprints_parcels(footprints, parcels)
+    log_data_frame(franklin_county_footprints)
 
-    combined_df = concat(footprints_with_years, osu_buildings)
+    non_franklin_county_footprints = load_non_franklin_county_building_footprints(all_ohio_footprints_file_name, county_outlines_file_name)
+    log_data_frame(non_franklin_county_footprints)
+
+    combined_df = concat(franklin_county_footprints, osu_buildings, non_franklin_county_footprints)
     log_data_frame(combined_df)
 
     final_df = filter_intersecting_buildings(combined_df)
